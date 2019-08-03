@@ -35,6 +35,10 @@ def get_latest_epoch(param):
 
 class SGAN:
     def __init__(self, _run_id=None):
+
+        target_size = (28, 28)
+        self.channels = 1
+
         if _run_id is None:
             self.run_id = get_random_string(8)
         else:
@@ -54,13 +58,10 @@ class SGAN:
         self.epoch_offset = 0
 
         self.train_gen = ImageDataGenerator(
-            featurewise_center=True,
-            featurewise_std_normalization=True,
-            # rescale=1 / 127.5
+            # featurewise_center=True,
+            # featurewise_std_normalization=True,
+            rescale=1 / 127.5
         )
-
-        target_size = (28, 28)
-        self.channels = 1
 
         if self.channels == 1:
             self.color_mode = 'grayscale'
@@ -81,29 +82,17 @@ class SGAN:
             color_mode=self.color_mode
         )
 
-        print("Loading images...")
-        files = self.train_generator.filepaths
-        shuffle(files)
-
-        sample_of_data = [
-            np.array(load_img(img, target_size=target_size, color_mode=self.color_mode).copy()) for img in files
-        ]
-        sample_of_data = np.array(sample_of_data)
-        sample_of_data = np.expand_dims(sample_of_data, axis=-1)
-        print("Fitting...")
-        self.train_gen.fit(sample_of_data)
-        del sample_of_data
-        print(f"Mean: {self.train_gen.mean}")
-        print(f"std: {self.train_gen.std}")
+        # self.populate_std_mean(target_size)
 
         self.img_shape = self.train_generator.image_shape
         self.num_classes = self.train_generator.num_classes
-        self.latent_dim = 300
+        self.latent_dim = 10
         # self.latent_dim = 200 # 300 is likely the limit for this GPU at batch size 2 and img [280,280,3]
         self.rows, self.columns = 3, 4
         self.img_save_noise = np.random.normal(0, 1, (self.rows * self.columns, self.latent_dim))
         print(f"img_shape: {self.img_shape}")
-        optimizer = Adam(0.0002, 0.5)
+        optimizer = Adam()
+        # optimizer = Adam(0.0002, 0.5)
 
         # Build and compile the discriminator
         self.discriminator = self.build_discriminator()
@@ -149,6 +138,21 @@ class SGAN:
             except Exception as e:
                 print(e)
 
+    def populate_std_mean(self, target_size):
+        print("Loading images...")
+        files = self.train_generator.filepaths
+        shuffle(files)
+        sample_of_data = [
+            np.array(load_img(img, target_size=target_size, color_mode=self.color_mode).copy()) for img in files
+        ]
+        sample_of_data = np.array(sample_of_data)
+        sample_of_data = np.expand_dims(sample_of_data, axis=-1)
+        print("Fitting...")
+        self.train_gen.fit(sample_of_data)
+        del sample_of_data
+        print(f"Mean: {self.train_gen.mean}")
+        print(f"std: {self.train_gen.std}")
+
     def load_latest_model(self, model_path, model):
         saved_models = [os.path.join(model_path, model, d) for d in os.listdir(os.path.join(model_path, model))]
         latest = max(saved_models, key=os.path.getmtime)
@@ -169,12 +173,12 @@ class SGAN:
         model.add(Conv2D(64, kernel_size=3, padding="same"))
         model.add(Activation("relu"))
         model.add(BatchNormalization(momentum=0.8))
-        if self.channels == 1:
-            model.add(Conv2D(self.img_shape[-1], kernel_size=1, padding="same"))  # grey
-        elif self.channels == 3:
-            model.add(Conv2D(self.img_shape[-1], kernel_size=3, padding="same"))  # rgb
-        else:
-            raise
+        model.add(Conv2D(self.img_shape[-1], kernel_size=3, padding="same"))  # grey
+        # if self.channels == 1:
+        # elif self.channels == 3:
+        #     model.add(Conv2D(self.img_shape[-1], kernel_size=3, padding="same"))  # rgb
+        # else:
+        #     raise
         model.add(Activation("tanh"))
 
         model.summary()
@@ -248,6 +252,7 @@ class SGAN:
             # ---------------------
 
             x, y = self.train_generator.next()
+            x -= 1
             if y.shape[0] != self.train_generator.batch_size:
                 print(f"Got non batch size: {y.shape[0]}")
                 continue
@@ -299,8 +304,10 @@ class SGAN:
         # plt.savefig(f"images/{run_id}/hotnot_{epoch}.png")
 
         gen_imgs = self.generator.predict(self.img_save_noise)
-        gen_imgs *= self.train_gen.std - 1e-6
-        gen_imgs += self.train_gen.mean
+        # gen_imgs *= self.train_gen.std - 1e-6
+        # gen_imgs += self.train_gen.mean
+        gen_imgs += 1
+        gen_imgs *= 127.5
 
         fig, axs = plt.subplots(self.rows, self.columns)
         cnt = 0
@@ -347,6 +354,7 @@ class SGAN:
 
 
 if __name__ == '__main__':
-    sgan = SGAN()
+    # sgan = SGAN()
     # sgan = SGAN(_run_id="VZMGUSKD")
-    sgan.train(epochs=20000, sample_interval=10)
+    sgan = SGAN(_run_id="9CI8QDWY")
+    sgan.train(epochs=20000, sample_interval=50)
