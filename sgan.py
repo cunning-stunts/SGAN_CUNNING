@@ -6,9 +6,6 @@ import os
 #     os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
 import random
 
-import win32file
-win32file._setmaxstdio(2048)
-
 import pathlib
 from collections import Counter
 from random import shuffle
@@ -30,6 +27,14 @@ from tensorflow.python.keras.models import load_model
 
 from create_gif import natural_keys
 from utils import get_random_string
+
+# for rtx 20xx cards
+config = tf.ConfigProto()
+config.gpu_options.allow_growth = True
+sess = tf.Session(config=config)
+
+IMAGE_DIMS = 1 # 3 for rgb
+DATA_PATH = '/home/paul/PycharmProjects/mnist_png/training'
 
 
 def get_latest_epoch(param):
@@ -57,20 +62,20 @@ class SGAN:
 
         self.train_gen = ImageDataGenerator(
             featurewise_center=True,
-            featurewise_std_normalization=True,
-            # rescale=1 / 127.5
+            featurewise_std_normalization=True
         )
 
         target_size = (28, 28)
         self.train_generator = self.train_gen.flow_from_directory(
-            os.path.join("C:/Users", "xfant", "PycharmProjects", "tinder", "photos"),
+            #os.path.join("C:/Users", "xfant", "PycharmProjects", "tinder", "photos"),
+            DATA_PATH,
             # target_size=(280, 280),
             target_size=target_size,
             batch_size=32,
             # batch_size=2,
             class_mode='binary',
             # color_mode='grayscale'
-            color_mode='rgb'
+            color_mode='grayscale'
         )
 
         print("Loading images...")
@@ -91,7 +96,7 @@ class SGAN:
 
         self.img_shape = self.train_generator.image_shape
         self.num_classes = self.train_generator.num_classes
-        self.latent_dim = 30_000
+        self.latent_dim = 3_000
         # self.latent_dim = 200 # 300 is likely the limit for this GPU at batch size 2 and img [280,280,3]
         self.rows, self.columns = 3, 4
         np.random.seed(1337)
@@ -158,13 +163,15 @@ class SGAN:
         model.add(BatchNormalization(momentum=0.8))
         model.add(UpSampling2D())
         model.add(Conv2D(128, kernel_size=3, padding="same"))
+        model.add(Conv2D(128, kernel_size=3, padding="same"))
         model.add(Activation("relu"))
         model.add(BatchNormalization(momentum=0.8))
         model.add(UpSampling2D())
         model.add(Conv2D(64, kernel_size=3, padding="same"))
+        model.add(Conv2D(64, kernel_size=3, padding="same"))
         model.add(Activation("relu"))
         model.add(BatchNormalization(momentum=0.8))
-        model.add(Conv2D(self.img_shape[-1], kernel_size=3, padding="same"))
+        model.add(Conv2D(self.img_shape[-1], kernel_size=IMAGE_DIMS, padding="same"))
         model.add(Activation("tanh"))
 
         model.summary()
@@ -183,15 +190,17 @@ class SGAN:
         model.add(LeakyReLU(alpha=0.2))
         model.add(Dropout(0.25))
         model.add(Conv2D(64, kernel_size=3, strides=2, padding="same"))
+        model.add(Conv2D(64, kernel_size=3, strides=2, padding="same"))
         model.add(ZeroPadding2D(padding=((0, 1), (0, 1))))
         model.add(LeakyReLU(alpha=0.2))
         model.add(Dropout(0.25))
         model.add(BatchNormalization(momentum=0.8))
         model.add(Conv2D(128, kernel_size=3, strides=2, padding="same"))
+        model.add(Conv2D(128, kernel_size=3, strides=2, padding="same"))
         model.add(LeakyReLU(alpha=0.2))
         model.add(Dropout(0.25))
         model.add(BatchNormalization(momentum=0.8))
-        model.add(Conv2D(256, kernel_size=3, strides=1, padding="same"))
+        model.add(Conv2D(256, kernel_size=IMAGE_DIMS, strides=1, padding="same"))
         model.add(LeakyReLU(alpha=0.2))
         model.add(Dropout(0.25))
         model.add(Flatten())
@@ -207,19 +216,6 @@ class SGAN:
         return Model(img, [valid, label])
 
     def train(self, epochs, sample_interval=50):
-
-        # Load the dataset
-        # (X_train, y_train), (_, _) = mnist.load_data()
-
-        # Rescale -1 to 1
-        # X_train = (X_train.astype(np.float32) - 127.5) / 127.5
-        # X_train = np.expand_dims(X_train, axis=3)
-        # y_train = y_train.reshape(-1, 1)
-
-        # Class weights:
-        # To balance the difference in occurences of digit class labels.
-        # 50% of labels that the discriminator trains on are 'fake'.
-        # Weight = 1 / frequency
         half_batch = self.train_generator.batch_size // 2
         counter = Counter(self.train_generator.classes)
         max_val = float(max(counter.values()))
@@ -237,9 +233,6 @@ class SGAN:
             #  Train Discriminator
             # ---------------------
 
-            # Select a random batch of images
-            # idx = np.random.randint(0, X_train.shape[0], batch_size)
-            # imgs = X_train[idx]
             x, y = self.train_generator.next()
             # x = x - 127.5
             if y.shape[0] != self.train_generator.batch_size:
@@ -284,17 +277,8 @@ class SGAN:
                     self.save_model(epoch)
 
     def sample_images(self, epoch):
-        # gen_imgs = self.generator.predict(self.img_save_noise)
-        # gen_imgs = 0.5 * gen_imgs + 0.5
-        # if self.img_shape[-1] == 1:
-        #     plt.imshow(gen_imgs[:, :, :, 0], cmap='gray')
-        # else:
-        #     plt.imshow(gen_imgs[:, :, :, :])
-        # plt.savefig(f"images/{run_id}/hotnot_{epoch}.png")
-
         gen_imgs = self.generator.predict(self.img_save_noise)
-        gen_imgs *= self.train_gen.std - 1e-6
-        gen_imgs += self.train_gen.mean
+        gen_imgs = (gen_imgs - 127.5) / 127.5
 
         fig, axs = plt.subplots(self.rows, self.columns)
         cnt = 0
@@ -314,7 +298,6 @@ class SGAN:
 
         def save(model, model_name):
             file_name = f"models/{self.run_id}/{model_name}.h5.tmp"
-            # model.save(f"models/{self.run_id}/{model_name}.h5")
             model.save_weights(file_name)
             os.rename(file_name, file_name.replace(".tmp", ""))
 
