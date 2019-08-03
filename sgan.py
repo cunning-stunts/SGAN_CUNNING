@@ -36,8 +36,12 @@ def get_latest_epoch(param):
 class SGAN:
     def __init__(self, _run_id=None):
 
-        target_size = (28, 28)
-        self.channels = 1
+        target_size = (320, 320)
+        self.channels = 3
+        self.latent_dim = 100
+        self.batch_size = 16
+        self.generator_feature_amount = 128
+        self.amount_of_generator_layer_units = 3
 
         if _run_id is None:
             self.run_id = get_random_string(8)
@@ -75,7 +79,7 @@ class SGAN:
             # os.path.join("C:/Users", "xfant", "PycharmProjects", "tinder", "photos"),
             # target_size=(280, 280),
             target_size=target_size,
-            batch_size=32,
+            batch_size=self.batch_size,
             # batch_size=2,
             class_mode='binary',
             # color_mode='grayscale'
@@ -86,7 +90,6 @@ class SGAN:
 
         self.img_shape = self.train_generator.image_shape
         self.num_classes = self.train_generator.num_classes
-        self.latent_dim = 10
         # self.latent_dim = 200 # 300 is likely the limit for this GPU at batch size 2 and img [280,280,3]
         self.rows, self.columns = 3, 4
         self.img_save_noise = np.random.normal(0, 1, (self.rows * self.columns, self.latent_dim))
@@ -138,7 +141,15 @@ class SGAN:
             except Exception as e:
                 print(e)
 
+        half_batch = self.train_generator.batch_size // 2
+        counter = Counter(self.train_generator.classes)
+        max_val = float(max(counter.values()))
+        self.cw1 = {class_id: max_val / num_images for class_id, num_images in counter.items()}
+        self.cw2 = {i: self.num_classes / half_batch for i in range(self.num_classes)}
+        self.cw2[self.num_classes] = 1 / half_batch
+
     def populate_std_mean(self, target_size):
+        # doesn't seem to work!
         print("Loading images...")
         files = self.train_generator.filepaths
         shuffle(files)
@@ -160,25 +171,29 @@ class SGAN:
 
     def build_generator(self):
         model = Sequential()
-        # model.add(Dense(128 * 70 * 70, activation="relu", input_dim=self.latent_dim))# for 280x280x3 images
-        # model.add(Reshape((70, 70, 128)))
-        model.add(Dense(128 * 7 * 7, activation="relu", input_dim=self.latent_dim))  # for 28x28x3 images
-        model.add(Reshape((7, 7, 128)))
+        x_units = self.img_shape[0]
+        for _ in range(self.amount_of_generator_layer_units):
+            x_units /= 2.0
+        x_units = int(x_units)
+
+        y_units = self.img_shape[1]
+        for _ in range(self.amount_of_generator_layer_units):
+            y_units /= 2.0
+        y_units = int(y_units)
+        model.add(Dense(
+            self.generator_feature_amount * x_units * y_units,
+            activation="relu", input_dim=self.latent_dim)
+        )
+        model.add(Reshape((x_units, y_units, self.generator_feature_amount)))
+        layer_features = self.generator_feature_amount
         model.add(BatchNormalization(momentum=0.8))
-        model.add(UpSampling2D())
-        model.add(Conv2D(128, kernel_size=3, padding="same"))
-        model.add(Activation("relu"))
-        model.add(BatchNormalization(momentum=0.8))
-        model.add(UpSampling2D())
-        model.add(Conv2D(64, kernel_size=3, padding="same"))
-        model.add(Activation("relu"))
-        model.add(BatchNormalization(momentum=0.8))
-        model.add(Conv2D(self.img_shape[-1], kernel_size=3, padding="same"))  # grey
-        # if self.channels == 1:
-        # elif self.channels == 3:
-        #     model.add(Conv2D(self.img_shape[-1], kernel_size=3, padding="same"))  # rgb
-        # else:
-        #     raise
+        for _ in range(self.amount_of_generator_layer_units):
+            model.add(UpSampling2D())
+            model.add(Conv2D(layer_features, kernel_size=3, padding="same"))
+            model.add(Activation("relu"))
+            model.add(BatchNormalization(momentum=0.8))
+            layer_features = int(layer_features / 2.0)
+        model.add(Conv2D(self.img_shape[-1], kernel_size=3, padding="same"))
         model.add(Activation("tanh"))
 
         model.summary()
@@ -190,21 +205,28 @@ class SGAN:
 
     def build_discriminator(self):
         model = Sequential()
+        # model.add(Conv2D(
+        #     self.train_generator.batch_size, kernel_size=3, strides=2,
+        #     input_shape=self.img_shape, padding="same"
+        # ))
         model.add(Conv2D(
-            self.train_generator.batch_size, kernel_size=3, strides=2,
+            self.train_generator.batch_size, kernel_size=3,
             input_shape=self.img_shape, padding="same"
         ))
         model.add(LeakyReLU(alpha=0.2))
         model.add(Dropout(0.25))
+        # model.add(Conv2D(64, kernel_size=3, padding="same"))
         model.add(Conv2D(64, kernel_size=3, strides=2, padding="same"))
         model.add(ZeroPadding2D(padding=((0, 1), (0, 1))))
         model.add(LeakyReLU(alpha=0.2))
         model.add(Dropout(0.25))
         model.add(BatchNormalization(momentum=0.8))
+        # model.add(Conv2D(128, kernel_size=3, padding="same"))
         model.add(Conv2D(128, kernel_size=3, strides=2, padding="same"))
         model.add(LeakyReLU(alpha=0.2))
         model.add(Dropout(0.25))
         model.add(BatchNormalization(momentum=0.8))
+        # model.add(Conv2D(256, kernel_size=3, padding="same"))
         model.add(Conv2D(256, kernel_size=3, strides=1, padding="same"))
         model.add(LeakyReLU(alpha=0.2))
         model.add(Dropout(0.25))
@@ -234,12 +256,6 @@ class SGAN:
         # To balance the difference in occurences of digit class labels.
         # 50% of labels that the discriminator trains on are 'fake'.
         # Weight = 1 / frequency
-        half_batch = self.train_generator.batch_size // 2
-        counter = Counter(self.train_generator.classes)
-        max_val = float(max(counter.values()))
-        cw1 = {class_id: max_val / num_images for class_id, num_images in counter.items()}
-        cw2 = {i: self.num_classes / half_batch for i in range(self.num_classes)}
-        cw2[self.num_classes] = 1 / half_batch
 
         # Adversarial ground truths
         valid = np.ones((self.train_generator.batch_size, 1))
@@ -268,15 +284,19 @@ class SGAN:
             )
 
             # Train the discriminator
-            d_loss_real = self.discriminator.train_on_batch(x, [valid, labels], class_weight=[cw1, cw2])
-            d_loss_fake = self.discriminator.train_on_batch(gen_imgs, [fake, fake_labels], class_weight=[cw1, cw2])
+            d_loss_real = self.discriminator.train_on_batch(
+                x, [valid, labels], class_weight=[self.cw1, self.cw2]
+            )
+            d_loss_fake = self.discriminator.train_on_batch(
+                gen_imgs, [fake, fake_labels], class_weight=[self.cw1, self.cw2]
+            )
             d_loss = 0.5 * np.add(d_loss_real, d_loss_fake)
 
             # ---------------------
             #  Train Generator
             # ---------------------
 
-            g_loss = self.combined.train_on_batch(noise, valid, class_weight=[cw1, cw2])
+            g_loss = self.combined.train_on_batch(noise, valid, class_weight=[self.cw1, self.cw2])
 
             self.write_log(['g_loss'], [g_loss], epoch)
             self.write_log(['d_loss', 'ukn_loss_1', 'ukn_loss_2', 'acc', 'op_acc'], d_loss, epoch)
@@ -354,7 +374,7 @@ class SGAN:
 
 
 if __name__ == '__main__':
-    # sgan = SGAN()
+    sgan = SGAN()
     # sgan = SGAN(_run_id="VZMGUSKD")
-    sgan = SGAN(_run_id="9CI8QDWY")
-    sgan.train(epochs=20000, sample_interval=50)
+    # sgan = SGAN(_run_id="9CI8QDWY")
+    sgan.train(epochs=20000, sample_interval=1)
