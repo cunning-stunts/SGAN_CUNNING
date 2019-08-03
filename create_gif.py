@@ -26,7 +26,10 @@ def natural_keys(text):
 
 
 def main():
-    run_id = sys.argv[1]
+    if len(sys.argv) > 1:
+        run_id = sys.argv[1]
+    else:
+        run_id = None
     max_duration = 30  # seconds
     min_time = 0.017  # seconds
     max_time = 0.2  # seconds
@@ -36,7 +39,7 @@ def main():
         if overwrite.lower() != "y":
             overwrite = False
 
-    if run_id is None or run_id == "":
+    if run_id is None:
         all_subdirs = [os.path.join("images", d) for d in os.listdir('images')]
         run_id = max(all_subdirs, key=os.path.getmtime)
     print(f"run_id: {run_id}")
