@@ -1,6 +1,7 @@
 from __future__ import print_function, division
 
 import os
+import pathlib
 # if __debug__:
 #     print("Debugging, so running on CPU!")
 #     os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
@@ -48,6 +49,8 @@ class SGAN:
             self.run_id = get_random_string(8)
         else:
             self.run_id = _run_id
+        np.random.seed(1337)
+        random.seed(1337)
         print(f"self.run_id: {self.run_id}")
 
         pathlib.Path(f"images/{self.run_id}").mkdir(parents=True, exist_ok=True)
@@ -66,6 +69,15 @@ class SGAN:
         )
 
         target_size = (28, 28)
+        self.channels = 1
+
+        if self.channels == 1:
+            color_mode = 'grayscale'
+        elif self.channels == 3:
+            color_mode = "rgb"
+        else:
+            raise
+
         self.train_generator = self.train_gen.flow_from_directory(
             #os.path.join("C:/Users", "xfant", "PycharmProjects", "tinder", "photos"),
             DATA_PATH,
@@ -75,33 +87,36 @@ class SGAN:
             # batch_size=2,
             class_mode='binary',
             # color_mode='grayscale'
-            color_mode='grayscale'
+            color_mode=color_mode
         )
 
         print("Loading images...")
         files = self.train_generator.filepaths
-        random.seed(1337)
         shuffle(files)
-        random.seed()
-        sample_of_data = []
-        for x in files[:2048]:
-            img = load_img(x, target_size=target_size)
-            img2 = np.array(img.copy())
-            img.close()
-            sample_of_data.append(img2)
+        if self.channels == 3:
+            color_mode = "rgb"
+        elif self.channels == 1:
+            color_mode = "grayscale"
+        else:
+            raise
+
+        sample_of_data = [
+            np.array(load_img(img, target_size=target_size, color_mode=color_mode).copy()) for img in files
+        ]
         sample_of_data = np.array(sample_of_data)
+        sample_of_data = np.expand_dims(sample_of_data, axis=-1)
         print("Fitting...")
         self.train_gen.fit(sample_of_data)
         del sample_of_data
+        print(f"Mean: {self.train_gen.mean}")
+        print(f"std: {self.train_gen.std}")
 
         self.img_shape = self.train_generator.image_shape
         self.num_classes = self.train_generator.num_classes
-        self.latent_dim = 3_000
+        self.latent_dim = 300
         # self.latent_dim = 200 # 300 is likely the limit for this GPU at batch size 2 and img [280,280,3]
         self.rows, self.columns = 3, 4
-        np.random.seed(1337)
         self.img_save_noise = np.random.normal(0, 1, (self.rows * self.columns, self.latent_dim))
-        np.random.seed(None)
         print(f"img_shape: {self.img_shape}")
         optimizer = Adam(0.0002, 0.5)
 
@@ -171,7 +186,12 @@ class SGAN:
         model.add(Conv2D(64, kernel_size=3, padding="same"))
         model.add(Activation("relu"))
         model.add(BatchNormalization(momentum=0.8))
-        model.add(Conv2D(self.img_shape[-1], kernel_size=IMAGE_DIMS, padding="same"))
+        if self.channels == 1:
+            model.add(Conv2D(self.img_shape[-1], kernel_size=1, padding="same"))  # grey
+        elif self.channels == 3:
+            model.add(Conv2D(self.img_shape[-1], kernel_size=3, padding="same"))  # rgb
+        else:
+            raise
         model.add(Activation("tanh"))
 
         model.summary()
@@ -234,7 +254,6 @@ class SGAN:
             # ---------------------
 
             x, y = self.train_generator.next()
-            # x = x - 127.5
             if y.shape[0] != self.train_generator.batch_size:
                 print(f"Got non batch size: {y.shape[0]}")
                 continue
