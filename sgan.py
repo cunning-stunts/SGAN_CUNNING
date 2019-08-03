@@ -63,9 +63,9 @@ class SGAN:
         self.channels = 1
 
         if self.channels == 1:
-            color_mode = 'grayscale'
+            self.color_mode = 'grayscale'
         elif self.channels == 3:
-            color_mode = "rgb"
+            self.color_mode = "rgb"
         else:
             raise
 
@@ -78,21 +78,15 @@ class SGAN:
             # batch_size=2,
             class_mode='binary',
             # color_mode='grayscale'
-            color_mode=color_mode
+            color_mode=self.color_mode
         )
 
         print("Loading images...")
         files = self.train_generator.filepaths
         shuffle(files)
-        if self.channels == 3:
-            color_mode = "rgb"
-        elif self.channels == 1:
-            color_mode = "grayscale"
-        else:
-            raise
 
         sample_of_data = [
-            np.array(load_img(img, target_size=target_size, color_mode=color_mode).copy()) for img in files
+            np.array(load_img(img, target_size=target_size, color_mode=self.color_mode).copy()) for img in files
         ]
         sample_of_data = np.array(sample_of_data)
         sample_of_data = np.expand_dims(sample_of_data, axis=-1)
