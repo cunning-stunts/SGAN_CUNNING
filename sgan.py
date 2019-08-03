@@ -61,10 +61,11 @@ class SGAN:
             # rescale=1 / 127.5
         )
 
+        target_size = (28, 28)
         self.train_generator = self.train_gen.flow_from_directory(
             os.path.join("C:/Users", "xfant", "PycharmProjects", "tinder", "photos"),
             # target_size=(280, 280),
-            target_size=(28, 28),
+            target_size=target_size,
             batch_size=32,
             # batch_size=2,
             class_mode='binary',
@@ -79,11 +80,11 @@ class SGAN:
         random.seed()
         sample_of_data = []
         for x in files[:2048]:
-            img = load_img(x)
-            img2 = img.copy()
+            img = load_img(x, target_size=target_size)
+            img2 = np.array(img.copy())
             img.close()
             sample_of_data.append(img2)
-        # sample_of_data = np.array(sample_of_data)
+        sample_of_data = np.array(sample_of_data)
         print("Fitting...")
         self.train_gen.fit(sample_of_data)
         del sample_of_data
