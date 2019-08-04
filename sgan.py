@@ -42,20 +42,15 @@ def get_latest_step(param):
 class SGAN:
     def __init__(self, _run_id=None):
 
-        target_size = (28, 28)
-        # target_size = (56, 56)
+        target_size = (112, 112)
         self.channels = 1
         self.latent_dim = 100
-        self.batch_size = 256
+        self.batch_size = 32
         self.generator_feature_amount = 128
-        self.amount_of_generator_layer_units = 2
+        self.amount_of_generator_layer_units = 4
         self.min_generator_feature_size = int(64)
-        # self.min_generator_feature_size = int(2.0 * target_size[0])
-        # self.learning_rate = 0.00001
         self.learning_rate = 0.0002
         self.adam_beta1 = 0.5
-        # self.adam_beta1 = 0.5
-        self.clip_value = 0.01
 
         if _run_id is None:
             self.run_id = get_random_string(8)
@@ -106,8 +101,7 @@ class SGAN:
         # Build and compile the discriminator
         self.discriminator = self.build_discriminator()
         self.discriminator.compile(
-            # loss=['binary_crossentropy', 'categorical_crossentropy'],
-            loss=[self.wasserstein_loss, 'categorical_crossentropy'],
+            loss=['binary_crossentropy', 'categorical_crossentropy'],
             loss_weights=[0.5, 0.5],
             optimizer=optimizer,
             metrics=['accuracy']
@@ -130,7 +124,7 @@ class SGAN:
         # Trains generator to fool discriminator
         self.combined = Model(noise, valid)
         self.combined.compile(
-            loss=self.wasserstein_loss, optimizer=optimizer
+            loss=['binary_crossentropy'], optimizer=optimizer
         )
         self.callback.set_model(self.combined)
         if _run_id:
@@ -156,25 +150,6 @@ class SGAN:
         self.cw1 = {class_id: max_val / num_images for class_id, num_images in counter.items()}
         self.cw2 = {i: self.num_classes / half_batch for i in range(self.num_classes)}
         self.cw2[self.num_classes] = 1 / half_batch
-
-    def wasserstein_loss(self, y_true, y_pred):
-        return K.mean(y_true * y_pred)
-
-    def populate_std_mean(self, target_size):
-        # doesn't seem to work!
-        print("Loading images...")
-        files = self.train_generator.filepaths
-        shuffle(files)
-        sample_of_data = [
-            np.array(load_img(img, target_size=target_size, color_mode=self.color_mode).copy()) for img in files
-        ]
-        sample_of_data = np.array(sample_of_data)
-        sample_of_data = np.expand_dims(sample_of_data, axis=-1)
-        print("Fitting...")
-        self.train_gen.fit(sample_of_data)
-        del sample_of_data
-        print(f"Mean: {self.train_gen.mean}")
-        print(f"std: {self.train_gen.std}")
 
     def load_latest_model(self, model_path, model):
         saved_models = [os.path.join(model_path, model, d) for d in os.listdir(os.path.join(model_path, model))]
@@ -211,28 +186,21 @@ class SGAN:
 
     def build_discriminator(self):
         model = Sequential()
-        # model.add(Conv2D(
-        #     self.train_generator.batch_size, kernel_size=3, strides=2,
-        #     input_shape=self.img_shape, padding="same"
-        # ))
         model.add(Conv2D(
             self.train_generator.batch_size, kernel_size=3,
             input_shape=self.img_shape, padding="same"
         ))
         model.add(LeakyReLU(alpha=0.2))
         model.add(Dropout(0.25))
-        # model.add(Conv2D(64, kernel_size=3, padding="same"))
         model.add(Conv2D(64, kernel_size=3, strides=2, padding="same"))
         model.add(ZeroPadding2D(padding=((0, 1), (0, 1))))
         model.add(LeakyReLU(alpha=0.2))
         model.add(Dropout(0.25))
         model.add(BatchNormalization(momentum=0.8))
-        # model.add(Conv2D(128, kernel_size=3, padding="same"))
         model.add(Conv2D(128, kernel_size=3, strides=2, padding="same"))
         model.add(LeakyReLU(alpha=0.2))
         model.add(Dropout(0.25))
         model.add(BatchNormalization(momentum=0.8))
-        # model.add(Conv2D(256, kernel_size=3, padding="same"))
         model.add(Conv2D(256, kernel_size=3, strides=1, padding="same"))
         model.add(LeakyReLU(alpha=0.2))
         model.add(Dropout(0.25))
@@ -290,12 +258,6 @@ class SGAN:
                 synthetic_images, [fake, fake_labels], class_weight=[self.cw1, self.cw2]
             )
             d_loss = 0.5 * np.add(d_loss_real, d_loss_fake)
-
-            # Clip critic weights
-            for l in self.discriminator.layers:
-                weights = l.get_weights()
-                weights = [np.clip(w, -self.clip_value, self.clip_value) for w in weights]
-                l.set_weights(weights)
 
             # ---------------------
             #  Train Generator
