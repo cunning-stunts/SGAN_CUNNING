@@ -116,6 +116,11 @@ class SGAN:
         model.add(Dropout(0.25))
         model.add(Flatten())
 
+        the_net = tf.keras.applications.mobilenet.MobileNet(include_top=False,
+                                                          weights=None,
+                                                          input_tensor=None,
+                                                          input_shape=(IMAGE_SIZE, IMAGE_SIZE, 1))
+
         model.summary()
 
         img = Input(shape=self.img_shape)
