@@ -11,6 +11,8 @@ from keras.models import Sequential, Model
 from keras.optimizers import Adam
 from keras.utils import to_categorical
 
+import keras
+
 import cv2
 
 import matplotlib.pyplot as plt
@@ -116,10 +118,11 @@ class SGAN:
         # model.add(Dropout(0.25))
         # model.add(Flatten())
 
-        the_net = tf.keras.applications.mobilenet.MobileNet(include_top=False,
+        model.add(keras.applications.MobileNet(include_top=False,
                                                           weights=None,
                                                           input_tensor=None,
-                                                          input_shape=(IMAGE_SIZE, IMAGE_SIZE, 1))
+                                                          input_shape=(IMAGE_SIZE, IMAGE_SIZE, 1)))
+        model.add(Flatten())
 
         model.summary()
 
