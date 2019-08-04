@@ -9,6 +9,7 @@ import random
 from collections import Counter
 from random import shuffle
 
+import keras.backend as K
 import matplotlib.pyplot as plt
 import numpy as np
 import tensorflow as tf
@@ -33,7 +34,7 @@ config.gpu_options.allow_growth = True
 sess = tf.Session(config=config)
 
 
-def get_latest_epoch(param):
+def get_latest_step(param):
     keys = [natural_keys(x)[1] for x in param]
     return int(max(keys) + 1)
 
@@ -45,10 +46,17 @@ class SGAN:
         # target_size = (56, 56)
         target_size = (112, 112)
         self.channels = 1
-        self.latent_dim = 300
-        self.batch_size = 128
-        self.generator_feature_amount = 256
-        self.amount_of_generator_layer_units = 4
+        self.latent_dim = 100
+        self.batch_size = 64
+        self.generator_feature_amount = 128
+        self.amount_of_generator_layer_units = 2
+        self.min_generator_feature_size = int(64)
+        # self.min_generator_feature_size = int(2.0 * target_size[0])
+        # self.learning_rate = 0.00001
+        self.learning_rate = 0.0002
+        self.adam_beta1 = 0.99
+        # self.adam_beta1 = 0.5
+        self.clip_value = 0.01
 
         if _run_id is None:
             self.run_id = get_random_string(8)
@@ -66,7 +74,7 @@ class SGAN:
         pathlib.Path(f"models/{self.run_id}/combined").mkdir(parents=True, exist_ok=True)
 
         self.callback = TensorBoard(log_path)
-        self.epoch_offset = 0
+        self.step_offset = 0
 
         self.train_gen = ImageDataGenerator(
             rescale=1 / 127.5
@@ -93,13 +101,14 @@ class SGAN:
         self.rows, self.columns = 3, 4
         self.img_save_noise = np.random.normal(0, 1, (self.rows * self.columns, self.latent_dim))
         print(f"img_shape: {self.img_shape}")
-        optimizer = Adam(0.0002, 0.5)
+        optimizer = Adam(self.learning_rate, self.adam_beta1)
         # optimizer = Adam()
 
         # Build and compile the discriminator
         self.discriminator = self.build_discriminator()
         self.discriminator.compile(
-            loss=['binary_crossentropy', 'categorical_crossentropy'],
+            # loss=['binary_crossentropy', 'categorical_crossentropy'],
+            loss=[self.wasserstein_loss, 'categorical_crossentropy'],
             loss_weights=[0.5, 0.5],
             optimizer=optimizer,
             metrics=['accuracy']
@@ -121,12 +130,14 @@ class SGAN:
         # The combined model  (stacked generator and discriminator)
         # Trains generator to fool discriminator
         self.combined = Model(noise, valid)
-        self.combined.compile(loss=['binary_crossentropy'], optimizer=optimizer)
+        self.combined.compile(
+            loss=self.wasserstein_loss, optimizer=optimizer
+        )
         self.callback.set_model(self.combined)
         if _run_id:
             latest_generator_path = self.get_latest_weights_path(_run_id, "generator")
             latest_discriminator_path = self.get_latest_weights_path(_run_id, "discriminator")
-            self.epoch_offset = get_latest_epoch([latest_generator_path, latest_discriminator_path])
+            self.step_offset = get_latest_step([latest_generator_path, latest_discriminator_path])
             try:
                 self.generator.load_weights(latest_generator_path)
             except Exception as e:
@@ -146,6 +157,9 @@ class SGAN:
         self.cw1 = {class_id: max_val / num_images for class_id, num_images in counter.items()}
         self.cw2 = {i: self.num_classes / half_batch for i in range(self.num_classes)}
         self.cw2[self.num_classes] = 1 / half_batch
+
+    def wasserstein_loss(self, y_true, y_pred):
+        return K.mean(y_true * y_pred)
 
     def populate_std_mean(self, target_size):
         # doesn't seem to work!
@@ -185,7 +199,7 @@ class SGAN:
             model.add(Conv2D(layer_features, kernel_size=3, padding="same"))
             model.add(Activation("relu"))
             model.add(BatchNormalization(momentum=0.8))
-            layer_features = max(int(layer_features * 0.5), 2 * (self.img_shape[0]))
+            layer_features = max(int(layer_features * 0.5), self.min_generator_feature_size)
         model.add(Conv2D(self.img_shape[-1], kernel_size=3, padding="same"))
         model.add(Activation("tanh"))
 
@@ -235,12 +249,12 @@ class SGAN:
 
         return Model(img, [valid, label])
 
-    def train(self, epochs, sample_interval=50):
+    def train(self, steps, sample_interval=50):
         # Adversarial ground truths
         valid = np.ones((self.train_generator.batch_size, 1))
         fake = np.zeros((self.train_generator.batch_size, 1))
 
-        for epoch in range(self.epoch_offset, epochs + self.epoch_offset):
+        for steps in range(self.step_offset, steps + self.step_offset):
 
             # ---------------------
             #  Train Discriminator
@@ -254,7 +268,7 @@ class SGAN:
 
             # Sample noise and generate a batch of new images
             noise = np.random.normal(0, 1, (self.train_generator.batch_size, self.latent_dim))
-            synthetic_images = self.generator.predict(noise[:len(noise) // 2])
+            synthetic_images = self.generator.predict(noise)
 
             # One-hot encoding of labels
             labels = to_categorical(y, num_classes=self.num_classes + 1)
@@ -263,20 +277,26 @@ class SGAN:
             )
 
             # Train the discriminator
-            x_combined = np.concatenate((ground_truth_images[:len(ground_truth_images) // 2], synthetic_images))
-            fakeness_combined = np.concatenate((valid[:len(valid) // 2], fake[:len(fake) // 2]))
-            labels_combined = np.concatenate((labels[:len(labels) // 2], fake_labels[:len(fake_labels) // 2]))
-
-            d_loss = self.discriminator.train_on_batch(
-                x_combined, [fakeness_combined, labels_combined], class_weight=[self.cw1, self.cw2]
+            # x_combined = np.concatenate((ground_truth_images[:len(ground_truth_images) // 2], synthetic_images))
+            # fakeness_combined = np.concatenate((valid[:len(valid) // 2], fake[:len(fake) // 2]))
+            # labels_combined = np.concatenate((labels[:len(labels) // 2], fake_labels[:len(fake_labels) // 2]))
+            #
+            # d_loss = self.discriminator.train_on_batch(
+            #     x_combined, [fakeness_combined, labels_combined], class_weight=[self.cw1, self.cw2]
+            # )
+            d_loss_real = self.discriminator.train_on_batch(
+                ground_truth_images, [valid, labels], class_weight=[self.cw1, self.cw2]
             )
-            # d_loss_real = self.discriminator.train_on_batch(
-            #     ground_truth_images, [valid, labels], class_weight=[self.cw1, self.cw2]
-            # )
-            # d_loss_fake = self.discriminator.train_on_batch(
-            #     synthetic_images, [fake, fake_labels], class_weight=[self.cw1, self.cw2]
-            # )
-            # d_loss = 0.5 * np.add(d_loss_real, d_loss_fake)
+            d_loss_fake = self.discriminator.train_on_batch(
+                synthetic_images, [fake, fake_labels], class_weight=[self.cw1, self.cw2]
+            )
+            d_loss = 0.5 * np.add(d_loss_real, d_loss_fake)
+
+            # Clip critic weights
+            for l in self.discriminator.layers:
+                weights = l.get_weights()
+                weights = [np.clip(w, -self.clip_value, self.clip_value) for w in weights]
+                l.set_weights(weights)
 
             # ---------------------
             #  Train Generator
@@ -284,23 +304,23 @@ class SGAN:
 
             g_loss = self.combined.train_on_batch(noise, valid, class_weight=[self.cw1, self.cw2])
 
-            self.write_log(['g_loss'], [g_loss], epoch)
-            self.write_log(['d_loss', 'ukn_loss_1', 'ukn_loss_2', 'acc', 'op_acc'], d_loss, epoch)
+            self.write_log(['g_loss'], [g_loss], steps)
+            self.write_log(['d_loss', 'ukn_loss_1', 'ukn_loss_2', 'acc', 'op_acc'], d_loss, steps)
 
             # Plot the progress
             print(
-                f"{epoch} [D loss: {d_loss[0]}, ukn_1: {d_loss[1]}, ukn_2: {d_loss[2]}, "
+                f"{steps} [D loss: {d_loss[0]}, ukn_1: {d_loss[1]}, ukn_2: {d_loss[2]}, "
                 f"acc: {100 * d_loss[3]}%, "
                 f"op_acc: {100 * d_loss[4]}%] [G loss: {g_loss}]"
             )
 
             # If at save interval => save generated image samples
-            if epoch % sample_interval == 0:
-                self.sample_images(epoch)
-                if epoch % 5000 == 0:
-                    self.save_model(epoch)
+            if steps % sample_interval == 0:
+                self.sample_images(steps)
+                if steps % 5000 == 0:
+                    self.save_model(steps)
 
-    def sample_images(self, epoch):
+    def sample_images(self, step):
         gen_imgs = self.generator.predict(self.img_save_noise)
         gen_imgs += 1
         gen_imgs *= 127.5
@@ -315,11 +335,11 @@ class SGAN:
                     axs[i, j].imshow(gen_imgs[cnt, :, :, :], interpolation='none')
                 axs[i, j].axis('off')
                 cnt += 1
-        plt.savefig(f"images/{self.run_id}/hotnot_{epoch}.png")
+        plt.savefig(f"images/{self.run_id}/hotnot_{step}.png")
         plt.clf()
         plt.close()
 
-    def save_model(self, epoch):
+    def save_model(self, step):
 
         def save(model, model_name):
             file_name = f"models/{self.run_id}/{model_name}.h5.tmp"
@@ -327,9 +347,9 @@ class SGAN:
             model.save_weights(file_name)
             os.rename(file_name, file_name.replace(".tmp", ""))
 
-        save(self.generator, f"generator/sgan_generator_{epoch}")
-        save(self.discriminator, f"discriminator/sgan_discriminator_{epoch}")
-        save(self.combined, f"combined/sgan_adversarial_{epoch}")
+        save(self.generator, f"generator/sgan_generator_{step}")
+        save(self.discriminator, f"discriminator/sgan_discriminator_{step}")
+        save(self.combined, f"combined/sgan_adversarial_{step}")
 
     def get_latest_weights_path(self, _run_id, model_name):
         saved_models = [
@@ -353,4 +373,4 @@ if __name__ == '__main__':
     sgan = SGAN()
     # sgan = SGAN(_run_id="VZMGUSKD")
     # sgan = SGAN(_run_id="9CI8QDWY")
-    sgan.train(epochs=20000, sample_interval=50)
+    sgan.train(steps=20000, sample_interval=50)
