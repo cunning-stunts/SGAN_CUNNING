@@ -42,19 +42,18 @@ def get_latest_step(param):
 class SGAN:
     def __init__(self, _run_id=None):
 
-        # target_size = (28, 28)
+        target_size = (28, 28)
         # target_size = (56, 56)
-        target_size = (112, 112)
         self.channels = 1
         self.latent_dim = 100
-        self.batch_size = 64
+        self.batch_size = 256
         self.generator_feature_amount = 128
         self.amount_of_generator_layer_units = 2
         self.min_generator_feature_size = int(64)
         # self.min_generator_feature_size = int(2.0 * target_size[0])
         # self.learning_rate = 0.00001
         self.learning_rate = 0.0002
-        self.adam_beta1 = 0.99
+        self.adam_beta1 = 0.5
         # self.adam_beta1 = 0.5
         self.clip_value = 0.01
 
