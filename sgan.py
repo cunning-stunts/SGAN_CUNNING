@@ -7,20 +7,17 @@ import pathlib
 #     os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
 import random
 from collections import Counter
-from random import shuffle
 
-import keras.backend as K
+import keras
 import matplotlib.pyplot as plt
 import numpy as np
 import tensorflow as tf
 from keras.callbacks import TensorBoard
-from keras.layers import BatchNormalization, Activation, ZeroPadding2D
-from keras.layers import Input, Dense, Reshape, Flatten, Dropout
-from keras.layers.advanced_activations import LeakyReLU
+from keras.layers import BatchNormalization, Activation
+from keras.layers import Input, Dense, Reshape, Flatten
 from keras.layers.convolutional import UpSampling2D, Conv2D
 from keras.models import Sequential, Model
 from keras.optimizers import Adam
-from keras.preprocessing.image import load_img
 from keras.utils import to_categorical
 from keras_preprocessing.image import ImageDataGenerator
 from tensorflow.python.keras.models import load_model
@@ -43,13 +40,14 @@ class SGAN:
     def __init__(self, _run_id=None):
 
         target_size = (112, 112)
-        self.channels = 1
+        self.channels = 3
         self.latent_dim = 100
         self.batch_size = 32
         self.generator_feature_amount = 128
         self.amount_of_generator_layer_units = 4
         self.min_generator_feature_size = int(64)
-        self.learning_rate = 0.0002
+        self.g_learning_rate = 0.0002
+        self.d_learning_rate = 0.0002
         self.adam_beta1 = 0.5
 
         if _run_id is None:
@@ -95,7 +93,6 @@ class SGAN:
         self.rows, self.columns = 3, 4
         self.img_save_noise = np.random.normal(0, 1, (self.rows * self.columns, self.latent_dim))
         print(f"img_shape: {self.img_shape}")
-        optimizer = Adam(self.learning_rate, self.adam_beta1)
         # optimizer = Adam()
 
         # Build and compile the discriminator
@@ -103,7 +100,7 @@ class SGAN:
         self.discriminator.compile(
             loss=['binary_crossentropy', 'categorical_crossentropy'],
             loss_weights=[0.5, 0.5],
-            optimizer=optimizer,
+            optimizer=Adam(self.d_learning_rate, self.adam_beta1),
             metrics=['accuracy']
         )
 
@@ -124,7 +121,9 @@ class SGAN:
         # Trains generator to fool discriminator
         self.combined = Model(noise, valid)
         self.combined.compile(
-            loss=['binary_crossentropy'], optimizer=optimizer
+            loss=['binary_crossentropy'],
+            optimizer=Adam(self.g_learning_rate, self.adam_beta1),
+            metrics=['accuracy']
         )
         self.callback.set_model(self.combined)
         if _run_id:
@@ -186,24 +185,30 @@ class SGAN:
 
     def build_discriminator(self):
         model = Sequential()
-        model.add(Conv2D(
-            self.train_generator.batch_size, kernel_size=3,
-            input_shape=self.img_shape, padding="same"
+        # model.add(Conv2D(
+        #     self.train_generator.batch_size, kernel_size=3,
+        #     input_shape=self.img_shape, padding="same"
+        # ))
+        # model.add(LeakyReLU(alpha=0.2))
+        # model.add(Dropout(0.25))
+        # model.add(Conv2D(64, kernel_size=3, strides=2, padding="same"))
+        # model.add(ZeroPadding2D(padding=((0, 1), (0, 1))))
+        # model.add(LeakyReLU(alpha=0.2))
+        # model.add(Dropout(0.25))
+        # model.add(BatchNormalization(momentum=0.8))
+        # model.add(Conv2D(128, kernel_size=3, strides=2, padding="same"))
+        # model.add(LeakyReLU(alpha=0.2))
+        # model.add(Dropout(0.25))
+        # model.add(BatchNormalization(momentum=0.8))
+        # model.add(Conv2D(256, kernel_size=3, strides=1, padding="same"))
+        # model.add(LeakyReLU(alpha=0.2))
+        # model.add(Dropout(0.25))
+        model.add(keras.applications.MobileNet(
+            include_top=False,
+            weights=None,
+            input_tensor=None,
+            input_shape=self.img_shape
         ))
-        model.add(LeakyReLU(alpha=0.2))
-        model.add(Dropout(0.25))
-        model.add(Conv2D(64, kernel_size=3, strides=2, padding="same"))
-        model.add(ZeroPadding2D(padding=((0, 1), (0, 1))))
-        model.add(LeakyReLU(alpha=0.2))
-        model.add(Dropout(0.25))
-        model.add(BatchNormalization(momentum=0.8))
-        model.add(Conv2D(128, kernel_size=3, strides=2, padding="same"))
-        model.add(LeakyReLU(alpha=0.2))
-        model.add(Dropout(0.25))
-        model.add(BatchNormalization(momentum=0.8))
-        model.add(Conv2D(256, kernel_size=3, strides=1, padding="same"))
-        model.add(LeakyReLU(alpha=0.2))
-        model.add(Dropout(0.25))
         model.add(Flatten())
 
         model.summary()
@@ -220,7 +225,6 @@ class SGAN:
         # Adversarial ground truths
         valid = np.ones((self.train_generator.batch_size, 1))
         fake = np.zeros((self.train_generator.batch_size, 1))
-
         for steps in range(self.step_offset, steps + self.step_offset):
 
             # ---------------------
@@ -243,14 +247,12 @@ class SGAN:
                 np.full((self.train_generator.batch_size, 1), self.num_classes), num_classes=self.num_classes + 1
             )
 
-            # Train the discriminator
-            # x_combined = np.concatenate((ground_truth_images[:len(ground_truth_images) // 2], synthetic_images))
-            # fakeness_combined = np.concatenate((valid[:len(valid) // 2], fake[:len(fake) // 2]))
-            # labels_combined = np.concatenate((labels[:len(labels) // 2], fake_labels[:len(fake_labels) // 2]))
-            #
-            # d_loss = self.discriminator.train_on_batch(
-            #     x_combined, [fakeness_combined, labels_combined], class_weight=[self.cw1, self.cw2]
-            # )
+            g_loss = self.combined.train_on_batch(noise, valid, class_weight=[self.cw1, self.cw2])
+            self.write_log(['g_loss', 'g_accuracy'], g_loss, steps)
+            print(
+                f"{steps} [G loss: {g_loss[0]} g_acc: {g_loss[1]}]"
+            )
+
             d_loss_real = self.discriminator.train_on_batch(
                 ground_truth_images, [valid, labels], class_weight=[self.cw1, self.cw2]
             )
@@ -258,21 +260,13 @@ class SGAN:
                 synthetic_images, [fake, fake_labels], class_weight=[self.cw1, self.cw2]
             )
             d_loss = 0.5 * np.add(d_loss_real, d_loss_fake)
-
-            # ---------------------
-            #  Train Generator
-            # ---------------------
-
-            g_loss = self.combined.train_on_batch(noise, valid, class_weight=[self.cw1, self.cw2])
-
-            self.write_log(['g_loss'], [g_loss], steps)
             self.write_log(['d_loss', 'ukn_loss_1', 'ukn_loss_2', 'acc', 'op_acc'], d_loss, steps)
 
             # Plot the progress
             print(
                 f"{steps} [D loss: {d_loss[0]}, ukn_1: {d_loss[1]}, ukn_2: {d_loss[2]}, "
                 f"acc: {100 * d_loss[3]}%, "
-                f"op_acc: {100 * d_loss[4]}%] [G loss: {g_loss}]"
+                f"op_acc: {100 * d_loss[4]}%]"
             )
 
             # If at save interval => save generated image samples
