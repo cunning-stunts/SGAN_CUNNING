@@ -40,7 +40,7 @@ class SGAN:
     def __init__(self, _run_id=None):
 
         target_size = (112, 112)
-        self.channels = 3
+        self.channels = 1
         self.latent_dim = 100
         self.batch_size = 32
         self.generator_feature_amount = 128
