@@ -21,3 +21,4 @@ __pycache__/
 *.gif
 
 mnist/
+cifar10/

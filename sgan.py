@@ -36,12 +36,14 @@ def get_latest_epoch(param):
 class SGAN:
     def __init__(self, _run_id=None):
 
-        target_size = (320, 320)
-        self.channels = 3
-        self.latent_dim = 100
-        self.batch_size = 16
+        # target_size = (28, 28)
+        # target_size = (56, 56)
+        target_size = (112, 112)
+        self.channels = 1
+        self.latent_dim = 300
+        self.batch_size = 32
         self.generator_feature_amount = 128
-        self.amount_of_generator_layer_units = 3
+        self.amount_of_generator_layer_units = 4
 
         if _run_id is None:
             self.run_id = get_random_string(8)
@@ -62,8 +64,6 @@ class SGAN:
         self.epoch_offset = 0
 
         self.train_gen = ImageDataGenerator(
-            # featurewise_center=True,
-            # featurewise_std_normalization=True,
             rescale=1 / 127.5
         )
 
@@ -77,25 +77,19 @@ class SGAN:
         self.train_generator = self.train_gen.flow_from_directory(
             os.path.join("C:/Users", "xfant", "PycharmProjects", "sgan", "mnist"),
             # os.path.join("C:/Users", "xfant", "PycharmProjects", "tinder", "photos"),
-            # target_size=(280, 280),
             target_size=target_size,
             batch_size=self.batch_size,
-            # batch_size=2,
             class_mode='binary',
-            # color_mode='grayscale'
             color_mode=self.color_mode
         )
 
-        # self.populate_std_mean(target_size)
-
         self.img_shape = self.train_generator.image_shape
         self.num_classes = self.train_generator.num_classes
-        # self.latent_dim = 200 # 300 is likely the limit for this GPU at batch size 2 and img [280,280,3]
         self.rows, self.columns = 3, 4
         self.img_save_noise = np.random.normal(0, 1, (self.rows * self.columns, self.latent_dim))
         print(f"img_shape: {self.img_shape}")
-        optimizer = Adam()
-        # optimizer = Adam(0.0002, 0.5)
+        optimizer = Adam(0.0002, 0.5)
+        # optimizer = Adam()
 
         # Build and compile the discriminator
         self.discriminator = self.build_discriminator()
@@ -171,15 +165,9 @@ class SGAN:
 
     def build_generator(self):
         model = Sequential()
-        x_units = self.img_shape[0]
-        for _ in range(self.amount_of_generator_layer_units):
-            x_units /= 2.0
-        x_units = int(x_units)
+        x_units = int(self.img_shape[0] * (0.5 ** self.amount_of_generator_layer_units))
+        y_units = int(self.img_shape[1] * (0.5 ** self.amount_of_generator_layer_units))
 
-        y_units = self.img_shape[1]
-        for _ in range(self.amount_of_generator_layer_units):
-            y_units /= 2.0
-        y_units = int(y_units)
         model.add(Dense(
             self.generator_feature_amount * x_units * y_units,
             activation="relu", input_dim=self.latent_dim)
@@ -192,7 +180,7 @@ class SGAN:
             model.add(Conv2D(layer_features, kernel_size=3, padding="same"))
             model.add(Activation("relu"))
             model.add(BatchNormalization(momentum=0.8))
-            layer_features = int(layer_features / 2.0)
+            layer_features = max(int(layer_features * 0.5), 64)
         model.add(Conv2D(self.img_shape[-1], kernel_size=3, padding="same"))
         model.add(Activation("tanh"))
 
@@ -243,20 +231,6 @@ class SGAN:
         return Model(img, [valid, label])
 
     def train(self, epochs, sample_interval=50):
-
-        # Load the dataset
-        # (X_train, y_train), (_, _) = mnist.load_data()
-
-        # Rescale -1 to 1
-        # X_train = (X_train.astype(np.float32) - 127.5) / 127.5
-        # X_train = np.expand_dims(X_train, axis=3)
-        # y_train = y_train.reshape(-1, 1)
-
-        # Class weights:
-        # To balance the difference in occurences of digit class labels.
-        # 50% of labels that the discriminator trains on are 'fake'.
-        # Weight = 1 / frequency
-
         # Adversarial ground truths
         valid = np.ones((self.train_generator.batch_size, 1))
         fake = np.zeros((self.train_generator.batch_size, 1))
@@ -267,15 +241,15 @@ class SGAN:
             #  Train Discriminator
             # ---------------------
 
-            x, y = self.train_generator.next()
-            x -= 1
+            ground_truth_images, y = self.train_generator.next()
+            ground_truth_images -= 1
             if y.shape[0] != self.train_generator.batch_size:
                 print(f"Got non batch size: {y.shape[0]}")
                 continue
 
             # Sample noise and generate a batch of new images
             noise = np.random.normal(0, 1, (self.train_generator.batch_size, self.latent_dim))
-            gen_imgs = self.generator.predict(noise)
+            synthetic_images = self.generator.predict(noise[:len(noise) // 2])
 
             # One-hot encoding of labels
             labels = to_categorical(y, num_classes=self.num_classes + 1)
@@ -284,13 +258,20 @@ class SGAN:
             )
 
             # Train the discriminator
-            d_loss_real = self.discriminator.train_on_batch(
-                x, [valid, labels], class_weight=[self.cw1, self.cw2]
+            x_combined = np.concatenate((ground_truth_images[:len(ground_truth_images) // 2], synthetic_images))
+            fakeness_combined = np.concatenate((valid[:len(valid) // 2], fake[:len(fake) // 2]))
+            labels_combined = np.concatenate((labels[:len(labels) // 2], fake_labels[:len(fake_labels) // 2]))
+
+            d_loss = self.discriminator.train_on_batch(
+                x_combined, [fakeness_combined, labels_combined], class_weight=[self.cw1, self.cw2]
             )
-            d_loss_fake = self.discriminator.train_on_batch(
-                gen_imgs, [fake, fake_labels], class_weight=[self.cw1, self.cw2]
-            )
-            d_loss = 0.5 * np.add(d_loss_real, d_loss_fake)
+            # d_loss_real = self.discriminator.train_on_batch(
+            #     ground_truth_images, [valid, labels], class_weight=[self.cw1, self.cw2]
+            # )
+            # d_loss_fake = self.discriminator.train_on_batch(
+            #     synthetic_images, [fake, fake_labels], class_weight=[self.cw1, self.cw2]
+            # )
+            # d_loss = 0.5 * np.add(d_loss_real, d_loss_fake)
 
             # ---------------------
             #  Train Generator
@@ -315,17 +296,7 @@ class SGAN:
                     self.save_model(epoch)
 
     def sample_images(self, epoch):
-        # gen_imgs = self.generator.predict(self.img_save_noise)
-        # gen_imgs = 0.5 * gen_imgs + 0.5
-        # if self.img_shape[-1] == 1:
-        #     plt.imshow(gen_imgs[:, :, :, 0], cmap='gray')
-        # else:
-        #     plt.imshow(gen_imgs[:, :, :, :])
-        # plt.savefig(f"images/{run_id}/hotnot_{epoch}.png")
-
         gen_imgs = self.generator.predict(self.img_save_noise)
-        # gen_imgs *= self.train_gen.std - 1e-6
-        # gen_imgs += self.train_gen.mean
         gen_imgs += 1
         gen_imgs *= 127.5
 
@@ -377,4 +348,4 @@ if __name__ == '__main__':
     sgan = SGAN()
     # sgan = SGAN(_run_id="VZMGUSKD")
     # sgan = SGAN(_run_id="9CI8QDWY")
-    sgan.train(epochs=20000, sample_interval=1)
+    sgan.train(epochs=20000, sample_interval=50)
