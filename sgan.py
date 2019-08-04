@@ -35,14 +35,15 @@ class SGAN:
         self.num_classes = 10
         self.latent_dim = 100
 
-        optimizer = Adam(0.0002, 0.5)
+        gen_optimizer = Adam(0.00002, 0.5)
+        des_optimizer = Adam(0.001, 0.5)
 
         # Build and compile the discriminator
         self.discriminator = self.build_discriminator()
         self.discriminator.compile(
             loss=['binary_crossentropy', 'categorical_crossentropy'],
             loss_weights=[0.5, 0.5],
-            optimizer=optimizer,
+            optimizer=des_optimizer,
             metrics=['accuracy']
         )
 
@@ -62,7 +63,7 @@ class SGAN:
         # The combined model  (stacked generator and discriminator)
         # Trains generator to fool discriminator
         self.combined = Model(noise, valid)
-        self.combined.compile(loss=['binary_crossentropy'], optimizer=optimizer)
+        self.combined.compile(loss=['binary_crossentropy'], optimizer=gen_optimizer)
 
     def build_generator(self):
 
@@ -72,22 +73,25 @@ class SGAN:
         model.add(Reshape((7, 7, 128)))
         model.add(BatchNormalization(momentum=0.8))
         model.add(UpSampling2D())
-        model.add(Conv2D(128, kernel_size=3, padding="same"))
+        model.add(Conv2D(128, kernel_size=5, padding="same"))
+        model.add(Activation("relu"))
+        model.add(BatchNormalization(momentum=0.8))
+        model.add(Conv2D(128, kernel_size=5, padding="same"))
         model.add(Activation("relu"))
         model.add(BatchNormalization(momentum=0.8))
         model.add(UpSampling2D())
-        model.add(Conv2D(64, kernel_size=3, padding="same"))
+        model.add(Conv2D(64, kernel_size=5, padding="same"))
         model.add(Activation("relu"))
         model.add(BatchNormalization(momentum=0.8))
         model.add(UpSampling2D())
-        model.add(Conv2D(64, kernel_size=3, padding="same"))
+        model.add(Conv2D(64, kernel_size=5, padding="same"))
         model.add(Activation("relu"))
         model.add(BatchNormalization(momentum=0.8))
         model.add(UpSampling2D())
-        model.add(Conv2D(64, kernel_size=3, padding="same"))
+        model.add(Conv2D(64, kernel_size=5, padding="same"))
         model.add(Activation("relu"))
         model.add(BatchNormalization(momentum=0.8))
-        model.add(Conv2D(1, kernel_size=3, padding="same"))
+        model.add(Conv2D(1, kernel_size=5, padding="same"))
         model.add(Activation("tanh"))
 
         model.summary()
@@ -116,12 +120,12 @@ class SGAN:
         # model.add(Conv2D(256, kernel_size=3, strides=1, padding="same"))
         # model.add(LeakyReLU(alpha=0.2))
         # model.add(Dropout(0.25))
-        # model.add(Flatten())
 
         model.add(keras.applications.MobileNet(include_top=False,
-                                                          weights=None,
-                                                          input_tensor=None,
-                                                          input_shape=(IMAGE_SIZE, IMAGE_SIZE, 1)))
+                                               weights=None,
+                                               input_tensor=None,
+                                               input_shape=(IMAGE_SIZE, IMAGE_SIZE, 1)))
+
         model.add(Flatten())
 
         model.summary()
@@ -142,7 +146,6 @@ class SGAN:
         # Rescale -1 to 1
         X_train = (X_train.astype(np.float32) - 127.5) / 127.5
         X_train = np.array([cv2.resize(x, dsize=(IMAGE_SIZE, IMAGE_SIZE)) for x in X_train])
-        # cv2.resize(X_train[None, :, :, :], dsize=(IMAGE_SIZE, IMAGE_SIZE))
         X_train = cv2.resize(X_train, dsize=(IMAGE_SIZE, IMAGE_SIZE))
         X_train = np.expand_dims(X_train, axis=3)
         y_train = y_train.reshape(-1, 1)
@@ -159,6 +162,9 @@ class SGAN:
         # Adversarial ground truths
         valid = np.ones((batch_size, 1))
         fake = np.zeros((batch_size, 1))
+
+        d_loss = None
+        g_loss = None
 
         for epoch in range(epochs):
 
@@ -182,7 +188,6 @@ class SGAN:
             d_loss_real = self.discriminator.train_on_batch(imgs, [valid, labels], class_weight=[cw1, cw2])
             d_loss_fake = self.discriminator.train_on_batch(gen_imgs, [fake, fake_labels], class_weight=[cw1, cw2])
             d_loss = 0.5 * np.add(d_loss_real, d_loss_fake)
-
 
             # ---------------------
             #  Train Generator
