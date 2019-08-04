@@ -27,6 +27,11 @@ from tensorflow.python.keras.models import load_model
 from create_gif import natural_keys
 from utils import get_random_string
 
+# for rtx 20xx cards
+config = tf.ConfigProto()
+config.gpu_options.allow_growth = True
+sess = tf.Session(config=config)
+
 
 def get_latest_epoch(param):
     keys = [natural_keys(x)[1] for x in param]
@@ -41,8 +46,8 @@ class SGAN:
         target_size = (112, 112)
         self.channels = 1
         self.latent_dim = 300
-        self.batch_size = 32
-        self.generator_feature_amount = 128
+        self.batch_size = 128
+        self.generator_feature_amount = 256
         self.amount_of_generator_layer_units = 4
 
         if _run_id is None:
@@ -180,7 +185,7 @@ class SGAN:
             model.add(Conv2D(layer_features, kernel_size=3, padding="same"))
             model.add(Activation("relu"))
             model.add(BatchNormalization(momentum=0.8))
-            layer_features = max(int(layer_features * 0.5), 64)
+            layer_features = max(int(layer_features * 0.5), 2 * (self.img_shape[0]))
         model.add(Conv2D(self.img_shape[-1], kernel_size=3, padding="same"))
         model.add(Activation("tanh"))
 
