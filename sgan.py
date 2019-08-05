@@ -13,7 +13,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import tensorflow as tf
 from keras.callbacks import TensorBoard
-from keras.layers import BatchNormalization, Activation
+from keras.layers import BatchNormalization, Activation, LeakyReLU, Dropout, ZeroPadding2D
 from keras.layers import Input, Dense, Reshape, Flatten
 from keras.layers.convolutional import UpSampling2D, Conv2D
 from keras.models import Sequential, Model
@@ -80,7 +80,8 @@ class SGAN:
             raise
 
         self.train_generator = self.train_gen.flow_from_directory(
-            os.path.join("C:/Users", "xfant", "PycharmProjects", "sgan", "mnist"),
+            os.path.join("C:/Users", "xfant", "PycharmProjects", "sgan", "cifar10"),
+            # os.path.join("C:/Users", "xfant", "PycharmProjects", "sgan", "mnist"),
             # os.path.join("C:/Users", "xfant", "PycharmProjects", "tinder", "photos"),
             target_size=target_size,
             batch_size=self.batch_size,
@@ -149,6 +150,8 @@ class SGAN:
         self.cw1 = {class_id: max_val / num_images for class_id, num_images in counter.items()}
         self.cw2 = {i: self.num_classes / half_batch for i in range(self.num_classes)}
         self.cw2[self.num_classes] = 1 / half_batch
+        print(f"Class weights 1: {self.cw1}")
+        print(f"Class weights 2: {self.cw2}")
 
     def load_latest_model(self, model_path, model):
         saved_models = [os.path.join(model_path, model, d) for d in os.listdir(os.path.join(model_path, model))]
@@ -185,30 +188,30 @@ class SGAN:
 
     def build_discriminator(self):
         model = Sequential()
-        # model.add(Conv2D(
-        #     self.train_generator.batch_size, kernel_size=3,
-        #     input_shape=self.img_shape, padding="same"
-        # ))
-        # model.add(LeakyReLU(alpha=0.2))
-        # model.add(Dropout(0.25))
-        # model.add(Conv2D(64, kernel_size=3, strides=2, padding="same"))
-        # model.add(ZeroPadding2D(padding=((0, 1), (0, 1))))
-        # model.add(LeakyReLU(alpha=0.2))
-        # model.add(Dropout(0.25))
-        # model.add(BatchNormalization(momentum=0.8))
-        # model.add(Conv2D(128, kernel_size=3, strides=2, padding="same"))
-        # model.add(LeakyReLU(alpha=0.2))
-        # model.add(Dropout(0.25))
-        # model.add(BatchNormalization(momentum=0.8))
-        # model.add(Conv2D(256, kernel_size=3, strides=1, padding="same"))
-        # model.add(LeakyReLU(alpha=0.2))
-        # model.add(Dropout(0.25))
-        model.add(keras.applications.MobileNet(
-            include_top=False,
-            weights=None,
-            input_tensor=None,
-            input_shape=self.img_shape
+        model.add(Conv2D(
+            self.train_generator.batch_size, kernel_size=3,
+            input_shape=self.img_shape, padding="same"
         ))
+        model.add(LeakyReLU(alpha=0.2))
+        model.add(Dropout(0.25))
+        model.add(Conv2D(64, kernel_size=3, strides=2, padding="same"))
+        model.add(ZeroPadding2D(padding=((0, 1), (0, 1))))
+        model.add(LeakyReLU(alpha=0.2))
+        model.add(Dropout(0.25))
+        model.add(BatchNormalization(momentum=0.8))
+        model.add(Conv2D(128, kernel_size=3, strides=2, padding="same"))
+        model.add(LeakyReLU(alpha=0.2))
+        model.add(Dropout(0.25))
+        model.add(BatchNormalization(momentum=0.8))
+        model.add(Conv2D(256, kernel_size=3, strides=1, padding="same"))
+        model.add(LeakyReLU(alpha=0.2))
+        model.add(Dropout(0.25))
+        # model.add(keras.applications.MobileNet(
+        #     include_top=False,
+        #     weights=None,
+        #     input_tensor=None,
+        #     input_shape=self.img_shape
+        # ))
         model.add(Flatten())
 
         model.summary()
