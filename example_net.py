@@ -25,17 +25,18 @@ def wide_and_deep_classifier(
         deep = tf.keras.layers.Dense(numnodes, activation='relu', name='dnn_{}'.format(layerno + 1))(deep)
     wide = tf.keras.layers.DenseFeatures(linear_feature_columns, name='wide_inputs')(inputs)
 
-    img_net = tf.keras.applications.mobilenet_v2.MobileNetV2(
-        input_shape=OUTPUT_IMG_SHAPE,
-        alpha=1.0,
-        include_top=False,
-        weights=None,
-        input_tensor=img_input,
-        pooling="max",
-        classes=number_of_target_classes,
-    )
+    # img_net = tf.keras.applications.mobilenet_v2.MobileNetV2(
+    #     input_shape=OUTPUT_IMG_SHAPE,
+    #     alpha=1.0,
+    #     include_top=False,
+    #     weights=None,
+    #     input_tensor=img_input,
+    #     pooling="max",
+    #     classes=number_of_target_classes,
+    # )
+    # both = tf.keras.layers.concatenate([deep, wide, img_net.output], name='both')
 
-    both = tf.keras.layers.concatenate([deep, wide, img_net.output], name='both')
+    both = tf.keras.layers.concatenate([deep, wide], name='both')
     output = tf.keras.layers.Dense(number_of_target_classes, activation='softmax', name='pred')(both)
     model = tf.keras.Model(inputs, output)
     model.compile(optimizer='adam',
