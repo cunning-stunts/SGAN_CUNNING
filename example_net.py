@@ -1,4 +1,5 @@
 import os
+import sys
 
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 import pathlib
@@ -76,7 +77,8 @@ def train_model(model, train_ds, test_ds, run_id, steps_per_epoch, validation_st
         filepath=os.path.join(model_path, 'model.cpt'),
         save_weights_only=False,
         save_best_only=True,
-        verbose=1
+        verbose=1,
+        load_weights_on_restart=True
     )
     callback = TensorBoard(model_path, update_freq=TENSORBOARD_UPDATE_FREQUENCY)
     callback.set_model(model)
@@ -163,4 +165,8 @@ def main(_run_id=None):
 
 
 if __name__ == '__main__':
-    main()
+    if len(sys.argv) > 1:
+        _run_id = sys.argv[1]
+    else:
+        _run_id = None
+    main(_run_id=_run_id)
