@@ -1,15 +1,17 @@
 import os
+
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 import pathlib
 import time
 
 import matplotlib.pyplot as plt
 import tensorflow as tf
+
 tf.logging.set_verbosity(tf.logging.ERROR)
 from sklearn.model_selection import train_test_split
 from tensorflow.python.keras.callbacks import TensorBoard
 
-from consts import BATCH_SIZE, EPOCHS
+from consts import BATCH_SIZE, EPOCHS, EMBEDDING_DIMS, HASH_BUCKET_SIZE, HIDDEN_UNITS
 from rxrx1_df import get_dataframe
 from rxrx1_ds import get_ds
 from utils import get_random_string, get_number_of_target_classes
@@ -29,11 +31,11 @@ def wide_and_deep_classifier(inputs, linear_feature_columns, dnn_feature_columns
     return model
 
 
-def get_features(ds, hash_bucket_size=100):
+def get_features(ds):
     real = {name: tf.feature_column.numeric_column(name)
             for name, dtype in ds.output_types[0].items()
             if name != "img" and dtype.name in ["int64"]}
-    sparse = {name: tf.feature_column.categorical_column_with_hash_bucket(name, hash_bucket_size=hash_bucket_size)
+    sparse = {name: tf.feature_column.categorical_column_with_hash_bucket(name, hash_bucket_size=HASH_BUCKET_SIZE)
               for name, dtype in ds.output_types[0].items()
               if dtype.name in ["string"]}
     inputs = {colname: tf.keras.layers.Input(name=colname, shape=(), dtype='float32')
@@ -41,7 +43,7 @@ def get_features(ds, hash_bucket_size=100):
     inputs.update({colname: tf.keras.layers.Input(name=colname, shape=(), dtype='string')
                    for colname in sparse.keys()})
     # embed all the sparse columns
-    embed = {'embed_{}'.format(colname): tf.feature_column.embedding_column(col, 10)
+    embed = {'embed_{}'.format(colname): tf.feature_column.embedding_column(col, EMBEDDING_DIMS)
              for colname, col in sparse.items()}
     real.update(embed)
     # one-hot encode the sparse columns
@@ -59,7 +61,7 @@ def train_model(model, train_ds, test_ds, run_id, steps_per_epoch):
         save_best_only=True,
         verbose=1
     )
-    callback = TensorBoard(model_path)
+    callback = TensorBoard(model_path, update_freq='batch')
     callback.set_model(model)
 
     history = model.fit(
@@ -110,6 +112,8 @@ def main(_run_id=None):
     total_samples: {total_samples}
     steps_per_epoch: {steps_per_epoch}
     run_id: {run_id}
+    gpu: {tf.test.is_gpu_available()}
+    cuda: {tf.test.is_built_with_cuda()}
     """)
 
     # no need for ID
@@ -124,7 +128,7 @@ def main(_run_id=None):
     df.pop("well_type")
 
     train_df, test_df = train_test_split(df)
-    train_ds = get_ds(train_df, number_of_target_classes=number_of_target_classes, training=True)
+    train_ds = get_ds(train_df, number_of_target_classes=number_of_target_classes, training=True, shuffle_buffer_size=1)
     test_ds = get_ds(test_df, number_of_target_classes=number_of_target_classes)
 
     inputs, sparse, real = get_features(train_ds)
@@ -132,7 +136,8 @@ def main(_run_id=None):
         inputs,
         linear_feature_columns=sparse.values(),
         dnn_feature_columns=real.values(),
-        dnn_hidden_units=[64, 32])
+        dnn_hidden_units=HIDDEN_UNITS
+    )
 
     # tf.keras.utils.plot_model(model, f'models/{run_id}/model.png', show_shapes=True, rankdir='LR')
     history = train_model(model, train_ds, test_ds, run_id, steps_per_epoch)

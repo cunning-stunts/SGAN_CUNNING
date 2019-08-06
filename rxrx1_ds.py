@@ -1,9 +1,12 @@
 import os
+
+from tensorflow.python.data.experimental import AUTOTUNE
+
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 
 import cv2
 import tensorflow as tf
-tf.logging.set_verbosity(tf.logging.ERROR) 
+tf.logging.set_verbosity(tf.logging.ERROR)
 import numpy as np
 from tensorflow.python.ops.image_ops_impl import convert_image_dtype, ResizeMethod
 
@@ -63,24 +66,23 @@ def get_ds(
     ds = tf.data.Dataset.from_tensor_slices((dict(df), one_hot))
     ds = ds.map(
         load_img,
-        num_parallel_calls=os.cpu_count()
+        num_parallel_calls=AUTOTUNE
     )
     if training:
         ds = ds.map(
             map_func=img_augmentation,
-            num_parallel_calls=os.cpu_count()
+            num_parallel_calls=AUTOTUNE
         )
     if shuffle:
         ds = ds.shuffle(buffer_size=shuffle_buffer_size)
 
     if normalise:
-        ds = ds.apply(tf.data.experimental.map_and_batch(
+        ds = ds.map(
             map_func=normalise_image,
-            batch_size=BATCH_SIZE,
-            num_parallel_batches=os.cpu_count(),
-        ))
-    else:
-        ds = ds.batch(BATCH_SIZE)
+            num_parallel_calls=AUTOTUNE
+        )
+    ds = ds.batch(BATCH_SIZE)
+    ds = ds.prefetch(AUTOTUNE)
     return ds
 
 
@@ -93,6 +95,13 @@ def show_ds(ds):
                 x1, y1 = sess.run([x, y])
                 imgs = x1["img"]
                 for img, y2 in zip(imgs, y1):  # batch size
+                    #
+                    # TODO:
+                    # BEAR IN MIND
+                    # THE ACTUAL CLASS ID IS 1..N
+                    # BUT ARGMAX WILL RETURN 0..N-1
+                    # TODO:
+                    #
                     argmax = np.argmax(y2)
                     print(f"y2: {argmax}")
                     cv2.imshow('image', img)
