@@ -57,7 +57,8 @@ def normalise_image(x_dict, label):
 def get_ds(
         df, number_of_target_classes, training=False,
         shuffle_buffer_size=10_000,
-        shuffle=None, normalise=True
+        shuffle=None, normalise=True,
+        perform_img_augmentation=False
 ):
     if shuffle is None:
         shuffle = True if training else False
@@ -68,7 +69,7 @@ def get_ds(
         load_img,
         num_parallel_calls=AUTOTUNE
     )
-    if training:
+    if perform_img_augmentation:
         ds = ds.map(
             map_func=img_augmentation,
             num_parallel_calls=AUTOTUNE
