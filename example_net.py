@@ -17,13 +17,15 @@ from rxrx1_ds import get_ds
 from utils import get_random_string, get_number_of_target_classes
 
 
-def wide_and_deep_classifier(inputs, linear_feature_columns, dnn_feature_columns, dnn_hidden_units):
+def wide_and_deep_classifier(
+        inputs, linear_feature_columns, dnn_feature_columns, dnn_hidden_units, number_of_target_classes
+):
     deep = tf.keras.layers.DenseFeatures(dnn_feature_columns, name='deep_inputs')(inputs)
     for layerno, numnodes in enumerate(dnn_hidden_units):
         deep = tf.keras.layers.Dense(numnodes, activation='relu', name='dnn_{}'.format(layerno + 1))(deep)
     wide = tf.keras.layers.DenseFeatures(linear_feature_columns, name='wide_inputs')(inputs)
     both = tf.keras.layers.concatenate([deep, wide], name='both')
-    output = tf.keras.layers.Dense(1, activation='sigmoid', name='pred')(both)
+    output = tf.keras.layers.Dense(number_of_target_classes, activation='sigmoid', name='pred')(both)
     model = tf.keras.Model(inputs, output)
     model.compile(optimizer='adam',
                   loss='categorical_crossentropy',
@@ -139,7 +141,8 @@ def main(_run_id=None):
         inputs,
         linear_feature_columns=sparse.values(),
         dnn_feature_columns=real.values(),
-        dnn_hidden_units=HIDDEN_UNITS
+        dnn_hidden_units=HIDDEN_UNITS,
+        number_of_target_classes=number_of_target_classes
     )
 
     # tf.keras.utils.plot_model(model, f'models/{run_id}/model.png', show_shapes=True, rankdir='LR')
