@@ -1,5 +1,6 @@
 import os
 
+import cv2
 import tensorflow as tf
 from sklearn.model_selection import train_test_split
 from tensorflow.python.keras.engine.training import Model
@@ -20,15 +21,21 @@ def main():
     df.pop("id_code")
     train, test = train_test_split(df)
 
-    train_ds = get_ds(train, training=True)
+    train_ds = get_ds(train, training=True, shuffle=False, normalise=False) # turn off shuffle/normalise for debugging
     test_ds = get_ds(test)
 
     iter = train_ds.make_one_shot_iterator()
     x, y = iter.get_next()
     with tf.Session() as sess:
-        x1, y1 = sess.run([x, y])
-        print(x1, y1)
+        while True:
+            x1, y1 = sess.run([x, y])
+            imgs = x1["img"]
+            for img in imgs:
+                cv2.imshow('image', img)
+                cv2.waitKey(0)
+        # print(x1, y1)
 
+    cv2.destroyAllWindows()
     input_shape = 123
     num_classes = len(unique_classes)
 
@@ -74,20 +81,20 @@ def load_img(feature, label):
     return feature, label
 
 
-def add_gausian_noise(x_new):
+def add_gausian_noise(x_new, std_dev):
     dtype = x_new.dtype
     flt_image = convert_image_dtype(x_new, tf.dtypes.float32)
-    flt_image += tf.random_normal(shape=tf.shape(flt_image), mean=0, stddev=.1, dtype=tf.dtypes.float32)
+    flt_image += tf.random_normal(shape=tf.shape(flt_image), mean=0, stddev=std_dev, dtype=tf.dtypes.float32)
     return tf.image.convert_image_dtype(flt_image, dtype, saturate=True)
 
 
 def img_augmentation(x_dict, label):
     x = x_dict["img"]
-    x_new = tf.image.random_brightness(x, 0.5)
-    x_new = tf.image.random_contrast(x_new, 0.4, 1.4)
+    x_new = tf.image.random_brightness(x, 0.1)
+    x_new = tf.image.random_contrast(x_new, 0.8, 1.2)
     # x_new = tf.image.random_hue(x_new, 0.06) # requires colour
     # x_new = tf.image.random_saturation(x_new, 0.1, 1.9) # requires colour
-    x_new = add_gausian_noise(x_new)
+    x_new = add_gausian_noise(x_new, std_dev=0.05)
     x_dict["img"] = x_new
 
     return x_dict, label
@@ -106,7 +113,7 @@ def normalise_image(x_dict, label):
 def get_ds(
         df, training=False, batch_size=32,
         shuffle_buffer_size=10_000,
-        shuffle=None
+        shuffle=None, normalise=True
 ):
     if shuffle is None:
         shuffle = True if training else False
@@ -123,11 +130,15 @@ def get_ds(
         )
     if shuffle:
         ds = ds.shuffle(buffer_size=shuffle_buffer_size)
-    ds = ds.apply(tf.data.experimental.map_and_batch(
-        map_func=normalise_image,
-        batch_size=batch_size,
-        num_parallel_batches=os.cpu_count(),
-    ))
+
+    if normalise:
+        ds = ds.apply(tf.data.experimental.map_and_batch(
+            map_func=normalise_image,
+            batch_size=batch_size,
+            num_parallel_batches=os.cpu_count(),
+        ))
+    else:
+        ds = ds.batch(batch_size)
     return ds
 
 
