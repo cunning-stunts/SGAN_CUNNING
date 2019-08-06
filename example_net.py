@@ -11,7 +11,7 @@ tf.logging.set_verbosity(tf.logging.ERROR)
 from sklearn.model_selection import train_test_split
 from tensorflow.python.keras.callbacks import TensorBoard
 
-from consts import BATCH_SIZE, EPOCHS, EMBEDDING_DIMS, HASH_BUCKET_SIZE, HIDDEN_UNITS
+from consts import BATCH_SIZE, EPOCHS, EMBEDDING_DIMS, HASH_BUCKET_SIZE, HIDDEN_UNITS, SHUFFLE_BUFFER_SIZE
 from rxrx1_df import get_dataframe
 from rxrx1_ds import get_ds
 from utils import get_random_string, get_number_of_target_classes
@@ -128,7 +128,10 @@ def main(_run_id=None):
     df.pop("well_type")
 
     train_df, test_df = train_test_split(df)
-    train_ds = get_ds(train_df, number_of_target_classes=number_of_target_classes, training=True, shuffle_buffer_size=1)
+    train_ds = get_ds(
+        train_df, number_of_target_classes=number_of_target_classes,
+        training=True, shuffle_buffer_size=SHUFFLE_BUFFER_SIZE
+    )
     test_ds = get_ds(test_df, number_of_target_classes=number_of_target_classes)
 
     inputs, sparse, real = get_features(train_ds)
