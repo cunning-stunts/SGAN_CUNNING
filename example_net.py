@@ -11,21 +11,32 @@ from sklearn.model_selection import train_test_split
 from tensorflow.python.keras.callbacks import TensorBoard
 
 from consts import BATCH_SIZE, EPOCHS, EMBEDDING_DIMS, HASH_BUCKET_SIZE, HIDDEN_UNITS, SHUFFLE_BUFFER_SIZE, \
-    TENSORBOARD_UPDATE_FREQUENCY
+    TENSORBOARD_UPDATE_FREQUENCY, OUTPUT_IMG_SHAPE
 from rxrx1_df import get_dataframe
 from rxrx1_ds import get_ds
 from utils import get_random_string, get_number_of_target_classes
 
 
 def wide_and_deep_classifier(
-        inputs, linear_feature_columns, dnn_feature_columns, dnn_hidden_units, number_of_target_classes
+        inputs, linear_feature_columns, dnn_feature_columns, dnn_hidden_units, number_of_target_classes, img_input
 ):
     deep = tf.keras.layers.DenseFeatures(dnn_feature_columns, name='deep_inputs')(inputs)
     for layerno, numnodes in enumerate(dnn_hidden_units):
         deep = tf.keras.layers.Dense(numnodes, activation='relu', name='dnn_{}'.format(layerno + 1))(deep)
     wide = tf.keras.layers.DenseFeatures(linear_feature_columns, name='wide_inputs')(inputs)
-    both = tf.keras.layers.concatenate([deep, wide], name='both')
-    output = tf.keras.layers.Dense(number_of_target_classes, activation='sigmoid', name='pred')(both)
+
+    img_net = tf.keras.applications.mobilenet_v2.MobileNetV2(
+        input_shape=OUTPUT_IMG_SHAPE,
+        alpha=1.0,
+        include_top=False,
+        weights=None,
+        input_tensor=img_input,
+        pooling="max",
+        classes=number_of_target_classes,
+    )
+
+    both = tf.keras.layers.concatenate([deep, wide, img_net.output], name='both')
+    output = tf.keras.layers.Dense(number_of_target_classes, activation='softmax', name='pred')(both)
     model = tf.keras.Model(inputs, output)
     model.compile(optimizer='adam',
                   loss='categorical_crossentropy',
@@ -51,7 +62,9 @@ def get_features(ds):
     # one-hot encode the sparse columns
     sparse = {colname: tf.feature_column.indicator_column(col)
               for colname, col in sparse.items()}
-    return inputs, sparse, real
+
+    img_input = tf.keras.layers.Input(name="img", shape=OUTPUT_IMG_SHAPE, dtype='float32')
+    return inputs, sparse, real, img_input
 
 
 def train_model(model, train_ds, test_ds, run_id, steps_per_epoch, validation_steps_per_epoch):
@@ -132,13 +145,14 @@ def main(_run_id=None):
         normalise=False
     )
 
-    inputs, sparse, real = get_features(train_ds)
+    inputs, sparse, real, img_input = get_features(train_ds)
     model = wide_and_deep_classifier(
         inputs,
         linear_feature_columns=sparse.values(),
         dnn_feature_columns=real.values(),
         dnn_hidden_units=HIDDEN_UNITS,
-        number_of_target_classes=number_of_target_classes
+        number_of_target_classes=number_of_target_classes,
+        img_input=img_input
     )
 
     # tf.keras.utils.plot_model(model, f'models/{run_id}/model.png', show_shapes=True, rankdir='LR')
