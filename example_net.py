@@ -1,145 +1,144 @@
 import os
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
+import pathlib
+import time
 
-import cv2
+import matplotlib.pyplot as plt
 import tensorflow as tf
+tf.logging.set_verbosity(tf.logging.ERROR)
 from sklearn.model_selection import train_test_split
-from tensorflow.python.keras.engine.training import Model
-from tensorflow.python.keras.layers import Flatten, Dense
-from tensorflow.python.ops.image_ops_impl import ResizeMethod, convert_image_dtype
+from tensorflow.python.keras.callbacks import TensorBoard
 
-from rxrx1_ds import get_dataframe
-
-INPUT_IMG_SHAPE = (512, 512, 1)
-OUTPUT_IMG_SHAPE = (512, 512, 1)
+from consts import BATCH_SIZE, EPOCHS
+from rxrx1_df import get_dataframe
+from rxrx1_ds import get_ds
+from utils import get_random_string, get_number_of_target_classes
 
 
-def main():
-    df = get_dataframe("D:\\rxrx1")
-    targets = df["sirna"].tolist()
-    unique_classes = set(targets)
-
-    df.pop("id_code")
-    train, test = train_test_split(df)
-
-    train_ds = get_ds(train, training=True, shuffle=False, normalise=False) # turn off shuffle/normalise for debugging
-    test_ds = get_ds(test)
-
-    iter = train_ds.make_one_shot_iterator()
-    x, y = iter.get_next()
-    with tf.Session() as sess:
-        while True:
-            x1, y1 = sess.run([x, y])
-            imgs = x1["img"]
-            for img in imgs:
-                cv2.imshow('image', img)
-                cv2.waitKey(0)
-        # print(x1, y1)
-
-    cv2.destroyAllWindows()
-    input_shape = 123
-    num_classes = len(unique_classes)
-
-    model = get_compiled_model(num_classes)
-
-    model.fit(
-        train_ds,
-        epochs=10,
-        steps_per_epoch=30,
-        validation_data=test_ds,
-        validation_steps=3
-    )
-
-    print("")
-
-
-def get_compiled_model(num_classes):
-    model = tf.keras.applications.mobilenet_v2.MobileNetV2(
-        input_shape=(512, 512, 3),
-        alpha=1.0,
-        include_top=False,
-        weights='imagenet',
-        input_tensor=None,
-        pooling=None
-    )
-    x = model.output
-    x = Flatten()(x)
-    predictions = Dense(num_classes, activation='softmax')(x)
-    model = Model(inputs=model.input, outputs=predictions)
-    model.compile(loss=tf.keras.losses.categorical_crossentropy,
-                  optimizer=tf.keras.optimizers.Adadelta(),
+def wide_and_deep_classifier(inputs, linear_feature_columns, dnn_feature_columns, dnn_hidden_units):
+    deep = tf.keras.layers.DenseFeatures(dnn_feature_columns, name='deep_inputs')(inputs)
+    for layerno, numnodes in enumerate(dnn_hidden_units):
+        deep = tf.keras.layers.Dense(numnodes, activation='relu', name='dnn_{}'.format(layerno + 1))(deep)
+    wide = tf.keras.layers.DenseFeatures(linear_feature_columns, name='wide_inputs')(inputs)
+    both = tf.keras.layers.concatenate([deep, wide], name='both')
+    output = tf.keras.layers.Dense(1, activation='sigmoid', name='pred')(both)
+    model = tf.keras.Model(inputs, output)
+    model.compile(optimizer='adam',
+                  loss='categorical_crossentropy',
                   metrics=['accuracy'])
     return model
 
 
-def load_img(feature, label):
-    path = feature["img_location"]
-    image = tf.read_file(path)
-    image = tf.io.decode_image(image, channels=INPUT_IMG_SHAPE[-1])
-    image.set_shape(INPUT_IMG_SHAPE)
-    del feature["img_location"]
-    feature["img"] = image
-    return feature, label
+def get_features(ds, hash_bucket_size=100):
+    real = {name: tf.feature_column.numeric_column(name)
+            for name, dtype in ds.output_types[0].items()
+            if name != "img" and dtype.name in ["int64"]}
+    sparse = {name: tf.feature_column.categorical_column_with_hash_bucket(name, hash_bucket_size=hash_bucket_size)
+              for name, dtype in ds.output_types[0].items()
+              if dtype.name in ["string"]}
+    inputs = {colname: tf.keras.layers.Input(name=colname, shape=(), dtype='float32')
+              for colname in real.keys()}
+    inputs.update({colname: tf.keras.layers.Input(name=colname, shape=(), dtype='string')
+                   for colname in sparse.keys()})
+    # embed all the sparse columns
+    embed = {'embed_{}'.format(colname): tf.feature_column.embedding_column(col, 10)
+             for colname, col in sparse.items()}
+    real.update(embed)
+    # one-hot encode the sparse columns
+    sparse = {colname: tf.feature_column.indicator_column(col)
+              for colname, col in sparse.items()}
+    return inputs, sparse, real
 
 
-def add_gausian_noise(x_new, std_dev):
-    dtype = x_new.dtype
-    flt_image = convert_image_dtype(x_new, tf.dtypes.float32)
-    flt_image += tf.random_normal(shape=tf.shape(flt_image), mean=0, stddev=std_dev, dtype=tf.dtypes.float32)
-    return tf.image.convert_image_dtype(flt_image, dtype, saturate=True)
-
-
-def img_augmentation(x_dict, label):
-    x = x_dict["img"]
-    x_new = tf.image.random_brightness(x, 0.1)
-    x_new = tf.image.random_contrast(x_new, 0.8, 1.2)
-    # x_new = tf.image.random_hue(x_new, 0.06) # requires colour
-    # x_new = tf.image.random_saturation(x_new, 0.1, 1.9) # requires colour
-    x_new = add_gausian_noise(x_new, std_dev=0.05)
-    x_dict["img"] = x_new
-
-    return x_dict, label
-
-
-def normalise_image(x_dict, label):
-    image = x_dict["img"]
-    image = tf.image.per_image_standardization(image)
-    image = tf.image.resize_images(
-        image, (OUTPUT_IMG_SHAPE[0], OUTPUT_IMG_SHAPE[1]), method=ResizeMethod.AREA
+def train_model(model, train_ds, test_ds, run_id, steps_per_epoch):
+    model_path = os.path.join("models", run_id)
+    pathlib.Path(model_path).mkdir(parents=True, exist_ok=True)
+    cp_callback = tf.keras.callbacks.ModelCheckpoint(
+        os.path.join(model_path, 'model.cpt'),
+        save_weights_only=False,
+        save_best_only=True,
+        verbose=1
     )
-    x_dict["img"] = image
-    return x_dict, label
+    callback = TensorBoard(model_path)
+    callback.set_model(model)
 
-
-def get_ds(
-        df, training=False, batch_size=32,
-        shuffle_buffer_size=10_000,
-        shuffle=None, normalise=True
-):
-    if shuffle is None:
-        shuffle = True if training else False
-    target = df.pop("sirna")
-    ds = tf.data.Dataset.from_tensor_slices((dict(df), target))
-    ds = ds.map(
-        load_img,
-        num_parallel_calls=os.cpu_count()
+    history = model.fit(
+        train_ds,
+        validation_data=test_ds,
+        epochs=EPOCHS,
+        steps_per_epoch=steps_per_epoch,
+        callbacks=[cp_callback, callback]
     )
-    if training:
-        ds = ds.map(
-            map_func=img_augmentation,
-            num_parallel_calls=os.cpu_count()
-        )
-    if shuffle:
-        ds = ds.shuffle(buffer_size=shuffle_buffer_size)
+    return history
 
-    if normalise:
-        ds = ds.apply(tf.data.experimental.map_and_batch(
-            map_func=normalise_image,
-            batch_size=batch_size,
-            num_parallel_batches=os.cpu_count(),
-        ))
+
+def plot_history(history):
+    print(history.history.keys())
+    nrows = 1
+    ncols = 2
+    fig = plt.figure(figsize=(10, 5))
+
+    for idx, key in enumerate(['loss', 'accuracy']):
+        ax = fig.add_subplot(nrows, ncols, idx + 1)
+        plt.plot(history.history[key])
+        plt.plot(history.history['val_{}'.format(key)])
+        plt.title('model {}'.format(key))
+        plt.ylabel(key)
+        plt.xlabel('epoch')
+        plt.legend(['train', 'validation'], loc='upper left')
+
+
+def export_saved_model(run_id, model):
+    export_dir = f'models/{run_id}/export/model_{time.strftime("%Y%m%d-%H%M%S")}'
+    print('Exporting to {}'.format(export_dir))
+    tf.keras.experimental.export_saved_model(model, export_dir)
+
+
+def main(_run_id=None):
+    df = get_dataframe("D:\\rxrx1")
+    number_of_target_classes = get_number_of_target_classes(df)
+    total_samples = len(df.index)
+    steps_per_epoch = total_samples // BATCH_SIZE
+
+    if _run_id is None:
+        run_id = get_random_string(8)
     else:
-        ds = ds.batch(batch_size)
-    return ds
+        run_id = _run_id
+
+    print(f"""
+    number_of_target_classes: {number_of_target_classes}
+    total_samples: {total_samples}
+    steps_per_epoch: {steps_per_epoch}
+    run_id: {run_id}
+    """)
+
+    # no need for ID
+    df.pop("id_code")
+
+    # these aren't in test dataset :(
+    #   we could use them, then when we are running inference on test data:
+    #       use random values
+    #       use average values
+    df.pop("site_num")
+    df.pop("microscope_channel")
+    df.pop("well_type")
+
+    train_df, test_df = train_test_split(df)
+    train_ds = get_ds(train_df, number_of_target_classes=number_of_target_classes, training=True)
+    test_ds = get_ds(test_df, number_of_target_classes=number_of_target_classes)
+
+    inputs, sparse, real = get_features(train_ds)
+    model = wide_and_deep_classifier(
+        inputs,
+        linear_feature_columns=sparse.values(),
+        dnn_feature_columns=real.values(),
+        dnn_hidden_units=[64, 32])
+
+    # tf.keras.utils.plot_model(model, f'models/{run_id}/model.png', show_shapes=True, rankdir='LR')
+    history = train_model(model, train_ds, test_ds, run_id, steps_per_epoch)
+    plot_history(history)
+    export_saved_model(run_id, model)
+    print("")
 
 
 if __name__ == '__main__':

@@ -1,86 +1,112 @@
 import os
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 
-import math
-import pandas as pd
+import cv2
+import tensorflow as tf
+tf.logging.set_verbosity(tf.logging.ERROR) 
 import numpy as np
+from tensorflow.python.ops.image_ops_impl import convert_image_dtype, ResizeMethod
+
+from consts import INPUT_IMG_SHAPE, OUTPUT_IMG_SHAPE, BATCH_SIZE
+from rxrx1_df import get_dataframe
+from utils import get_number_of_target_classes
 
 
-def get_filename(i):
-    return os.path.basename(os.path.normpath(i))
+def load_img(feature, label):
+    path = feature["img_location"]
+    image = tf.io.read_file(path)
+    image = tf.io.decode_image(image, channels=INPUT_IMG_SHAPE[-1])
+    image.set_shape(INPUT_IMG_SHAPE)
+    del feature["img_location"]
+    feature["img"] = image
+    return feature, label
 
 
-def get_dataframe(ds_location):
-    if os.path.exists("df.pkl"):
-        print("Loading existing df!")
-        return pd.read_pickle("df.pkl")
-        # return pickle.load("df.pkl")
-    train_df = get_merged_df(ds_location, "train")
-    train_df["sirna"] = train_df["sirna"].astype(int)
-    train_df["sirna"] = train_df["sirna"].astype(str)
-    train_df["well_type"] = train_df["well_type"].replace(np.nan, '', regex=True)
-    train_df.to_pickle("df.pkl")
-    return train_df
+def add_gausian_noise(x_new, std_dev):
+    dtype = x_new.dtype
+    flt_image = convert_image_dtype(x_new, tf.dtypes.float32)
+    flt_image += tf.random_normal(shape=tf.shape(flt_image), mean=0, stddev=std_dev, dtype=tf.dtypes.float32)
+    return tf.image.convert_image_dtype(flt_image, dtype, saturate=True)
 
 
-def get_merged_df(ds_location, dataset_type):
-    sirna_df = pd.read_csv(os.path.join(ds_location, f"{dataset_type}.csv"))
-    controls_df = pd.read_csv(os.path.join(ds_location, f"{dataset_type}_controls.csv"))
-    data = []
-    tests = [os.path.join(ds_location, dataset_type, t) for t in os.listdir(os.path.join(ds_location, dataset_type))]
-    for t in tests:
-        print(f"Loading: {str(t)}")
-        plates = [os.path.join(t, p) for p in os.listdir(t)]
-        for p in plates:
-            imgs = [os.path.join(p, i) for i in os.listdir(p)]
-            for i in imgs:
-                f_name = get_filename(i)
-                parts = f_name.split("_")
+def img_augmentation(x_dict, label):
+    x = x_dict["img"]
+    x_new = tf.image.random_brightness(x, 0.05)
+    x_new = tf.image.random_contrast(x_new, 0.8, 1.2)
+    # x_new = tf.image.random_hue(x_new, 0.06) # requires colour
+    # x_new = tf.image.random_saturation(x_new, 0.1, 1.9) # requires colour
+    x_new = add_gausian_noise(x_new, std_dev=0.05)
+    x_dict["img"] = x_new
 
-                well = str(parts[0])
-                well_column = well[0]
-                well_row = int(well.replace(well_column, ""))
-                site = int(str(parts[1]).replace("s", ""))
-                microscope_channel = int(str(parts[2]).replace(".png", "").replace("w", ""))
-                test = get_filename(t)
-                cell_line = test.split("-")[0]
-                batch_number = int(test.split("-")[1])
-                plate = int(str(get_filename(p)).replace("Plate", ""))
-
-                data.append({
-                    "well_column": well_column,
-                    "well_row": well_row,
-                    "site_num": site,
-                    "microscope_channel": microscope_channel,
-                    "cell_line": cell_line,
-                    "batch_number": batch_number,
-                    "plate": plate,
-                    "img_location": i,
-                    "id_code": f"{cell_line}-{batch_number:02d}_{plate}_{well_column}{well_row:02d}"
-                })
-    return merge_dfs(sirna_df, pd.DataFrame(data), controls_df)
+    return x_dict, label
 
 
-# SALE NOW ON
-def merge_dfs(sirna_df, metadata_df, controls_df):
-    metadata_with_sirna = pd.merge(metadata_df, sirna_df[["id_code", "sirna"]], on="id_code", how="left")
-    sirnas = metadata_with_sirna.pop("sirna")
-    control_merged = pd.merge(
-        metadata_with_sirna,
-        controls_df[["id_code", "well_type", "sirna"]],
-        on="id_code", how="left"
+def normalise_image(x_dict, label):
+    image = x_dict["img"]
+    image = tf.image.per_image_standardization(image)
+    image = tf.image.resize_images(
+        image, (OUTPUT_IMG_SHAPE[0], OUTPUT_IMG_SHAPE[1]), method=ResizeMethod.AREA
     )
-    sirnas2 = control_merged.pop("sirna")
-    sirnas3 = []
-    for s1, s2 in zip(sirnas, sirnas2):
-        if not math.isnan(s1):
-            sirnas3.append(s1)
-        elif not math.isnan(s2):
-            sirnas3.append(s2)
-        else:
-            raise
-    control_merged["sirna"] = sirnas3
-    return control_merged
+    x_dict["img"] = image
+    return x_dict, label
+
+
+def get_ds(
+        df, number_of_target_classes, training=False,
+        shuffle_buffer_size=10_000,
+        shuffle=None, normalise=True
+):
+    if shuffle is None:
+        shuffle = True if training else False
+    one_hot = tf.one_hot(df.pop("sirna"), number_of_target_classes)
+
+    ds = tf.data.Dataset.from_tensor_slices((dict(df), one_hot))
+    ds = ds.map(
+        load_img,
+        num_parallel_calls=os.cpu_count()
+    )
+    if training:
+        ds = ds.map(
+            map_func=img_augmentation,
+            num_parallel_calls=os.cpu_count()
+        )
+    if shuffle:
+        ds = ds.shuffle(buffer_size=shuffle_buffer_size)
+
+    if normalise:
+        ds = ds.apply(tf.data.experimental.map_and_batch(
+            map_func=normalise_image,
+            batch_size=BATCH_SIZE,
+            num_parallel_batches=os.cpu_count(),
+        ))
+    else:
+        ds = ds.batch(BATCH_SIZE)
+    return ds
+
+
+def show_ds(ds):
+    iter = ds.make_one_shot_iterator()
+    x, y = iter.get_next()
+    with tf.Session() as sess:
+        while True:
+            try:
+                x1, y1 = sess.run([x, y])
+                imgs = x1["img"]
+                for img, y2 in zip(imgs, y1):  # batch size
+                    argmax = np.argmax(y2)
+                    print(f"y2: {argmax}")
+                    cv2.imshow('image', img)
+                    cv2.waitKey(0)
+            except Exception as e:
+                print(e)
+                break
+    cv2.destroyAllWindows()
 
 
 if __name__ == '__main__':
-    _train_df, _test_df = get_dataframe("D:\\rxrx1")
+    _df = get_dataframe("D:\\rxrx1")
+    number_of_classes = get_number_of_target_classes(_df)
+    _ds = get_ds(
+        _df, number_of_target_classes=number_of_classes, normalise=False
+    )
+    show_ds(_ds)
