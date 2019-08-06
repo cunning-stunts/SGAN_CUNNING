@@ -1,13 +1,12 @@
 import os
 
-os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 import pathlib
 import time
 
-import matplotlib.pyplot as plt
 import tensorflow as tf
 
-tf.logging.set_verbosity(tf.logging.ERROR)
+tf.logging.set_verbosity(tf.logging.WARN)
 from sklearn.model_selection import train_test_split
 from tensorflow.python.keras.callbacks import TensorBoard
 
@@ -55,11 +54,12 @@ def get_features(ds):
     return inputs, sparse, real
 
 
-def train_model(model, train_ds, test_ds, run_id, steps_per_epoch):
+def train_model(model, train_ds, test_ds, run_id, steps_per_epoch, validation_steps_per_epoch):
     model_path = os.path.join("models", run_id)
     pathlib.Path(model_path).mkdir(parents=True, exist_ok=True)
     cp_callback = tf.keras.callbacks.ModelCheckpoint(
-        os.path.join(model_path, 'model.cpt'),
+        monitor='val_loss',
+        filepath=os.path.join(model_path, 'model.cpt'),
         save_weights_only=False,
         save_best_only=True,
         verbose=1
@@ -72,29 +72,14 @@ def train_model(model, train_ds, test_ds, run_id, steps_per_epoch):
         validation_data=test_ds,
         epochs=EPOCHS,
         steps_per_epoch=steps_per_epoch,
+        validation_steps=validation_steps_per_epoch,
         callbacks=[cp_callback, callback]
     )
     return history
 
 
-def plot_history(history):
-    print(history.history.keys())
-    nrows = 1
-    ncols = 2
-    fig = plt.figure(figsize=(10, 5))
-
-    for idx, key in enumerate(['loss', 'accuracy']):
-        ax = fig.add_subplot(nrows, ncols, idx + 1)
-        plt.plot(history.history[key])
-        plt.plot(history.history['val_{}'.format(key)])
-        plt.title('model {}'.format(key))
-        plt.ylabel(key)
-        plt.xlabel('epoch')
-        plt.legend(['train', 'validation'], loc='upper left')
-
-
 def export_saved_model(run_id, model):
-    export_dir = f'models/{run_id}/export/model_{time.strftime("%Y%m%d-%H%M%S")}'
+    export_dir = os.path.join('models', run_id, f'model_{time.strftime("%Y%m%d-%H%M%S")}')
     print('Exporting to {}'.format(export_dir))
     tf.keras.experimental.export_saved_model(model, export_dir)
 
@@ -102,22 +87,11 @@ def export_saved_model(run_id, model):
 def main(_run_id=None):
     df = get_dataframe("D:\\rxrx1")
     number_of_target_classes = get_number_of_target_classes(df)
-    total_samples = len(df.index)
-    steps_per_epoch = total_samples // BATCH_SIZE
 
     if _run_id is None:
         run_id = get_random_string(8)
     else:
         run_id = _run_id
-
-    print(f"""
-    number_of_target_classes: {number_of_target_classes}
-    total_samples: {total_samples}
-    steps_per_epoch: {steps_per_epoch}
-    run_id: {run_id}
-    gpu: {tf.test.is_gpu_available()}
-    cuda: {tf.test.is_built_with_cuda()}
-    """)
 
     # no need for ID
     df.pop("id_code")
@@ -131,6 +105,23 @@ def main(_run_id=None):
     df.pop("well_type")
 
     train_df, test_df = train_test_split(df)
+    training_samples = len(train_df.index)
+    training_steps_per_epoch = training_samples // BATCH_SIZE
+    validation_samples = len(test_df.index)
+    validation_steps_per_epoch = validation_samples // BATCH_SIZE
+
+    print(f"""
+    number_of_target_classes: {number_of_target_classes}
+    total_samples: {training_samples + validation_samples}
+    training_samples: {training_samples}
+    training_steps_per_epoch: {training_steps_per_epoch}
+    validation_samples: {validation_samples}
+    validation_steps_per_epoch: {validation_steps_per_epoch}
+    run_id: {run_id}
+    gpu: {tf.test.is_gpu_available()}
+    cuda: {tf.test.is_built_with_cuda()}
+    """)
+
     train_ds = get_ds(
         train_df, number_of_target_classes=number_of_target_classes,
         training=True, shuffle_buffer_size=SHUFFLE_BUFFER_SIZE,
@@ -151,8 +142,7 @@ def main(_run_id=None):
     )
 
     # tf.keras.utils.plot_model(model, f'models/{run_id}/model.png', show_shapes=True, rankdir='LR')
-    history = train_model(model, train_ds, test_ds, run_id, steps_per_epoch)
-    plot_history(history)
+    train_model(model, train_ds, test_ds, run_id, training_steps_per_epoch, validation_steps_per_epoch)
     export_saved_model(run_id, model)
     print("")
 

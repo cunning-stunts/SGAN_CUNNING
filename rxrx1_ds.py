@@ -2,11 +2,11 @@ import os
 
 from tensorflow.python.data.experimental import AUTOTUNE
 
-os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 
 import cv2
 import tensorflow as tf
-tf.logging.set_verbosity(tf.logging.ERROR)
+tf.logging.set_verbosity(tf.logging.WARN)
 import numpy as np
 from tensorflow.python.ops.image_ops_impl import convert_image_dtype, ResizeMethod
 
@@ -84,7 +84,7 @@ def get_ds(
         )
     ds = ds.batch(BATCH_SIZE)
     ds = ds.prefetch(AUTOTUNE)
-    return ds
+    return ds.repeat()
 
 
 def show_ds(ds):
