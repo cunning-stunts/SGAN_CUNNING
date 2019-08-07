@@ -19,25 +19,31 @@ from utils import get_random_string, get_number_of_target_classes
 
 
 def wide_and_deep_classifier(
-        inputs, linear_feature_columns, dnn_feature_columns, dnn_hidden_units, number_of_target_classes, img_input
+        inputs, linear_feature_columns, dnn_feature_columns,
+        dnn_hidden_units, number_of_target_classes, img_feature_column
 ):
     deep = tf.keras.layers.DenseFeatures(dnn_feature_columns, name='deep_inputs')(inputs)
     for layerno, numnodes in enumerate(dnn_hidden_units):
         deep = tf.keras.layers.Dense(numnodes, activation='relu', name='dnn_{}'.format(layerno + 1))(deep)
     wide = tf.keras.layers.DenseFeatures(linear_feature_columns, name='wide_inputs')(inputs)
 
-    # img_net = tf.keras.applications.mobilenet_v2.MobileNetV2(
-    #     input_shape=OUTPUT_IMG_SHAPE,
-    #     alpha=1.0,
-    #     include_top=False,
-    #     weights=None,
-    #     input_tensor=img_input,
-    #     pooling="max",
-    #     classes=number_of_target_classes,
-    # )
-    # both = tf.keras.layers.concatenate([deep, wide, img_net.output], name='both')
+    img = tf.keras.layers.DenseFeatures(img_feature_column, name='img_inputs')(inputs)
+    img = tf.reshape(img, shape=[-1, OUTPUT_IMG_SHAPE[0], OUTPUT_IMG_SHAPE[1], OUTPUT_IMG_SHAPE[2]])
+    img = tf.keras.layers.Input(tensor=img, shape=OUTPUT_IMG_SHAPE)
+    img_net = tf.keras.applications.mobilenet_v2.MobileNetV2(
+        # input_shape=OUTPUT_IMG_SHAPE,
+        alpha=1.0,
+        include_top=False,
+        weights=None,
+        input_tensor=img,
+        pooling="max",
+        classes=number_of_target_classes,
+    )
+    img_output = tf.keras.Model(inputs=img, outputs=img_net)
 
-    both = tf.keras.layers.concatenate([deep, wide], name='both')
+    both = tf.keras.layers.concatenate([deep, wide, img_output.output], name='both')
+
+    # both = tf.keras.layers.concatenate([deep, wide], name='both')
     output = tf.keras.layers.Dense(number_of_target_classes, activation='softmax', name='pred')(both)
     model = tf.keras.Model(inputs, output)
     model.compile(optimizer='adam',
@@ -53,10 +59,12 @@ def get_features(ds):
     sparse = {name: tf.feature_column.categorical_column_with_hash_bucket(name, hash_bucket_size=HASH_BUCKET_SIZE)
               for name, dtype in ds.output_types[0].items()
               if dtype.name in ["string"]}
+
     inputs = {colname: tf.keras.layers.Input(name=colname, shape=(), dtype='float32')
               for colname in real.keys()}
     inputs.update({colname: tf.keras.layers.Input(name=colname, shape=(), dtype='string')
                    for colname in sparse.keys()})
+
     # embed all the sparse columns
     embed = {'embed_{}'.format(colname): tf.feature_column.embedding_column(col, EMBEDDING_DIMS)
              for colname, col in sparse.items()}
@@ -65,8 +73,11 @@ def get_features(ds):
     sparse = {colname: tf.feature_column.indicator_column(col)
               for colname, col in sparse.items()}
 
-    img_input = tf.keras.layers.Input(name="img", shape=OUTPUT_IMG_SHAPE, dtype='float32')
-    return inputs, sparse, real, img_input
+    img_feature_column = tf.feature_column.numeric_column(key="img")
+    inputs.update({
+        "img": tf.keras.layers.Input(name="img", shape=(), dtype='float32')
+    })
+    return inputs, sparse, real, img_feature_column
 
 
 def train_model(model, train_ds, test_ds, run_id, steps_per_epoch, validation_steps_per_epoch):
@@ -148,14 +159,14 @@ def main(_run_id=None):
         normalise=False
     )
 
-    inputs, sparse, real, img_input = get_features(train_ds)
+    inputs, sparse, real, img_feature_column = get_features(train_ds)
     model = wide_and_deep_classifier(
         inputs,
         linear_feature_columns=sparse.values(),
         dnn_feature_columns=real.values(),
         dnn_hidden_units=HIDDEN_UNITS,
         number_of_target_classes=number_of_target_classes,
-        img_input=img_input
+        img_feature_column=img_feature_column
     )
 
     # tf.keras.utils.plot_model(model, f'models/{run_id}/model.png', show_shapes=True, rankdir='LR')
