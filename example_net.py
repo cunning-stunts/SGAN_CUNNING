@@ -12,10 +12,15 @@ from sklearn.model_selection import train_test_split
 from tensorflow.python.keras.callbacks import TensorBoard
 
 from consts import BATCH_SIZE, EPOCHS, EMBEDDING_DIMS, HASH_BUCKET_SIZE, HIDDEN_UNITS, SHUFFLE_BUFFER_SIZE, \
-    TENSORBOARD_UPDATE_FREQUENCY, OUTPUT_IMG_SHAPE
+    TENSORBOARD_UPDATE_FREQUENCY, IMG_SHAPE # OUTPUT_IMG_SHAPE
 from rxrx1_df import get_dataframe
 from rxrx1_ds import get_ds
 from utils import get_random_string, get_number_of_target_classes
+
+# for rtx 20xx cards
+config = tf.ConfigProto()
+config.gpu_options.allow_growth = True
+sess = tf.Session(config=config)
 
 
 def wide_and_deep_classifier(
@@ -27,23 +32,16 @@ def wide_and_deep_classifier(
         deep = tf.keras.layers.Dense(numnodes, activation='relu', name='dnn_{}'.format(layerno + 1))(deep)
     wide = tf.keras.layers.DenseFeatures(linear_feature_columns, name='wide_inputs')(inputs)
 
-    img = tf.keras.layers.DenseFeatures(img_feature_column, name='img_inputs')(inputs)
-    img = tf.reshape(img, shape=[-1, OUTPUT_IMG_SHAPE[0], OUTPUT_IMG_SHAPE[1], OUTPUT_IMG_SHAPE[2]])
-    img = tf.keras.layers.Input(tensor=img, shape=OUTPUT_IMG_SHAPE)
     img_net = tf.keras.applications.mobilenet_v2.MobileNetV2(
-        # input_shape=OUTPUT_IMG_SHAPE,
         alpha=1.0,
-        include_top=False,
+        include_top=True,
         weights=None,
-        input_tensor=img,
-        pooling="max",
-        classes=number_of_target_classes,
+        input_tensor=inputs['img'],
+        pooling="max"
     )
-    img_output = tf.keras.Model(inputs=img, outputs=img_net)
 
-    both = tf.keras.layers.concatenate([deep, wide, img_output.output], name='both')
+    both = tf.keras.layers.concatenate([deep, wide, img_net.output], name='both')
 
-    # both = tf.keras.layers.concatenate([deep, wide], name='both')
     output = tf.keras.layers.Dense(number_of_target_classes, activation='softmax', name='pred')(both)
     model = tf.keras.Model(inputs, output)
     model.compile(optimizer='adam',
@@ -75,7 +73,7 @@ def get_features(ds):
 
     img_feature_column = tf.feature_column.numeric_column(key="img")
     inputs.update({
-        "img": tf.keras.layers.Input(name="img", shape=(), dtype='float32')
+        "img": tf.keras.layers.Input(name="img", shape=(IMG_SHAPE[0], IMG_SHAPE[1], IMG_SHAPE[2]), dtype='float32')
     })
     return inputs, sparse, real, img_feature_column
 
@@ -112,7 +110,7 @@ def export_saved_model(run_id, model):
 
 
 def main(_run_id=None):
-    df = get_dataframe("D:\\rxrx1")
+    df = get_dataframe('/home/paul/PycharmProjects/recursion-cellular-image-classification')
     number_of_target_classes = get_number_of_target_classes(df)
 
     if _run_id is None:
@@ -168,6 +166,8 @@ def main(_run_id=None):
         number_of_target_classes=number_of_target_classes,
         img_feature_column=img_feature_column
     )
+
+    model.summary()
 
     # tf.keras.utils.plot_model(model, f'models/{run_id}/model.png', show_shapes=True, rankdir='LR')
     train_model(model, train_ds, test_ds, run_id, training_steps_per_epoch, validation_steps_per_epoch)
