@@ -63,6 +63,9 @@ def get_features(ds):
     inputs.update({colname: tf.keras.layers.Input(name=colname, shape=(), dtype='string')
                    for colname in sparse.keys()})
 
+    # we should have a crossed column
+    # sparse['crossed'] = tf.feature_column.crossed_column([sparse['well_column'], real['well_row']], HASH_BUCKET_SIZE)
+
     # embed all the sparse columns
     embed = {'embed_{}'.format(colname): tf.feature_column.embedding_column(col, EMBEDDING_DIMS)
              for colname, col in sparse.items()}
