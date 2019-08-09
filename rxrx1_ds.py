@@ -82,6 +82,7 @@ def get_ds(
         load_img,
         num_parallel_calls=AUTOTUNE
     )
+    ds = ds.apply(tf.data.experimental.ignore_errors())
     if CROP:
         ds = ds.map(
             crop_image,

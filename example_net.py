@@ -96,7 +96,7 @@ def train_model(model, train_ds, test_ds, run_id, steps_per_epoch, validation_st
         verbose=1,
         load_weights_on_restart=True
     )
-    callback = TensorBoard(model_path, update_freq=TENSORBOARD_UPDATE_FREQUENCY)
+    callback = tf.keras.callbacks.TensorBoard(model_path, update_freq=TENSORBOARD_UPDATE_FREQUENCY)
     callback.set_model(model)
 
     history = model.fit(

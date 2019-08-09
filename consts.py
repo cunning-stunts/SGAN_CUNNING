@@ -1,6 +1,6 @@
 INPUT_IMG_SHAPE = (512, 512, 1)
-OUTPUT_IMG_SHAPE = (227, 227, 1)
-CROP_SIZE = (64, 64, 1)
+OUTPUT_IMG_SHAPE = (256, 256, 1)  # half of the input image size
+CROP_SIZE = (128, 128, 1)  # 1/8 of the input image feels better then 1/16
 CROP = True
 BATCH_SIZE = 32
 EPOCHS = 100
