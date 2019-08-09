@@ -10,7 +10,7 @@ tf.logging.set_verbosity(tf.logging.WARN)
 import numpy as np
 from tensorflow.python.ops.image_ops_impl import convert_image_dtype, ResizeMethod
 
-from consts import INPUT_IMG_SHAPE, OUTPUT_IMG_SHAPE, BATCH_SIZE
+from consts import INPUT_IMG_SHAPE, OUTPUT_IMG_SHAPE, BATCH_SIZE, CROP_SIZE, CROP
 from rxrx1_df import get_dataframe
 from utils import get_number_of_target_classes
 
@@ -36,6 +36,8 @@ def img_augmentation(x_dict, label):
     x = x_dict["img"]
     x_new = tf.image.random_brightness(x, 0.05)
     x_new = tf.image.random_contrast(x_new, 0.8, 1.2)
+    x_new = tf.image.random_flip_left_right(x_new)
+    x_new = tf.image.random_flip_up_down(x_new)
     # x_new = tf.image.random_hue(x_new, 0.06) # requires colour
     # x_new = tf.image.random_saturation(x_new, 0.1, 1.9) # requires colour
     x_new = add_gausian_noise(x_new, std_dev=0.05)
@@ -47,10 +49,19 @@ def img_augmentation(x_dict, label):
 def normalise_image(x_dict, label):
     image = x_dict["img"]
     image = tf.image.per_image_standardization(image)
-    image = tf.image.resize_images(
-        image, (OUTPUT_IMG_SHAPE[0], OUTPUT_IMG_SHAPE[1]), method=ResizeMethod.AREA
-    )
+    if not CROP:
+        image = tf.image.resize_images(
+            image, [OUTPUT_IMG_SHAPE[0], OUTPUT_IMG_SHAPE[1]], method=ResizeMethod.AREA
+        )
     x_dict["img"] = image
+    return x_dict, label
+
+
+def crop_image(x_dict, label):
+    x_dict["img"] = tf.image.random_crop(
+        x_dict["img"],
+        size=CROP_SIZE
+    )
     return x_dict, label
 
 
@@ -58,10 +69,12 @@ def get_ds(
         df, number_of_target_classes, training=False,
         shuffle_buffer_size=10_000,
         shuffle=None, normalise=True,
-        perform_img_augmentation=False
+        perform_img_augmentation=None
 ):
     if shuffle is None:
         shuffle = True if training else False
+    if perform_img_augmentation is None:
+        perform_img_augmentation = True if training else False
     one_hot = tf.one_hot(df.pop("sirna"), number_of_target_classes)
 
     ds = tf.data.Dataset.from_tensor_slices((dict(df), one_hot))
@@ -69,12 +82,18 @@ def get_ds(
         load_img,
         num_parallel_calls=AUTOTUNE
     )
+    if CROP:
+        ds = ds.map(
+            crop_image,
+            num_parallel_calls=AUTOTUNE
+        )
     if perform_img_augmentation:
         ds = ds.map(
             map_func=img_augmentation,
             num_parallel_calls=AUTOTUNE
         )
     if shuffle:
+        print(f"Filling shuffle buffer {shuffle_buffer_size}, this may take some time...")
         ds = ds.shuffle(buffer_size=shuffle_buffer_size)
 
     if normalise:

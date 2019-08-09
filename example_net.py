@@ -12,7 +12,7 @@ from sklearn.model_selection import train_test_split
 from tensorflow.python.keras.callbacks import TensorBoard
 
 from consts import BATCH_SIZE, EPOCHS, EMBEDDING_DIMS, HASH_BUCKET_SIZE, HIDDEN_UNITS, SHUFFLE_BUFFER_SIZE, \
-    TENSORBOARD_UPDATE_FREQUENCY, IMG_SHAPE # OUTPUT_IMG_SHAPE
+    TENSORBOARD_UPDATE_FREQUENCY, OUTPUT_IMG_SHAPE, CROP, CROP_SIZE
 from rxrx1_df import get_dataframe
 from rxrx1_ds import get_ds
 from utils import get_random_string, get_number_of_target_classes
@@ -25,7 +25,7 @@ sess = tf.Session(config=config)
 
 def wide_and_deep_classifier(
         inputs, linear_feature_columns, dnn_feature_columns,
-        dnn_hidden_units, number_of_target_classes, img_feature_column
+        dnn_hidden_units, number_of_target_classes
 ):
     deep = tf.keras.layers.DenseFeatures(dnn_feature_columns, name='deep_inputs')(inputs)
     for layerno, numnodes in enumerate(dnn_hidden_units):
@@ -34,7 +34,7 @@ def wide_and_deep_classifier(
 
     img_net = tf.keras.applications.mobilenet_v2.MobileNetV2(
         alpha=1.0,
-        include_top=True,
+        include_top=False,
         weights=None,
         input_tensor=inputs['img'],
         pooling="max"
@@ -71,11 +71,15 @@ def get_features(ds):
     sparse = {colname: tf.feature_column.indicator_column(col)
               for colname, col in sparse.items()}
 
-    img_feature_column = tf.feature_column.numeric_column(key="img")
-    inputs.update({
-        "img": tf.keras.layers.Input(name="img", shape=(IMG_SHAPE[0], IMG_SHAPE[1], IMG_SHAPE[2]), dtype='float32')
-    })
-    return inputs, sparse, real, img_feature_column
+    if CROP:
+        inputs.update({
+            "img": tf.keras.layers.Input(name="img", shape=CROP_SIZE, dtype='float32')
+        })
+    else:
+        inputs.update({
+            "img": tf.keras.layers.Input(name="img", shape=OUTPUT_IMG_SHAPE, dtype='float32')
+        })
+    return inputs, sparse, real
 
 
 def train_model(model, train_ds, test_ds, run_id, steps_per_epoch, validation_steps_per_epoch):
@@ -149,25 +153,22 @@ def main(_run_id=None):
 
     train_ds = get_ds(
         train_df, number_of_target_classes=number_of_target_classes,
-        training=True, shuffle_buffer_size=SHUFFLE_BUFFER_SIZE,
-        normalise=False, perform_img_augmentation=False
+        training=True, shuffle_buffer_size=SHUFFLE_BUFFER_SIZE
     )
     test_ds = get_ds(
-        test_df, number_of_target_classes=number_of_target_classes,
-        normalise=False
+        test_df, number_of_target_classes=number_of_target_classes
     )
 
-    inputs, sparse, real, img_feature_column = get_features(train_ds)
+    inputs, sparse, real = get_features(train_ds)
     model = wide_and_deep_classifier(
         inputs,
         linear_feature_columns=sparse.values(),
         dnn_feature_columns=real.values(),
         dnn_hidden_units=HIDDEN_UNITS,
-        number_of_target_classes=number_of_target_classes,
-        img_feature_column=img_feature_column
+        number_of_target_classes=number_of_target_classes
     )
 
-    model.summary()
+    # model.summary()
 
     # tf.keras.utils.plot_model(model, f'models/{run_id}/model.png', show_shapes=True, rankdir='LR')
     train_model(model, train_ds, test_ds, run_id, training_steps_per_epoch, validation_steps_per_epoch)
