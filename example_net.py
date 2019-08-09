@@ -125,13 +125,9 @@ def main(_run_id=None):
     # no need for ID
     df.pop("id_code")
 
-    # these aren't in test dataset :(
-    #   we could use them, then when we are running inference on test data:
-    #       use random values
-    #       use average values
-    df.pop("site_num")
-    df.pop("microscope_channel")
-    df.pop("well_type")
+    # df.pop("site_num")
+    # df.pop("microscope_channel")
+    # df.pop("well_type")
 
     train_df, test_df = train_test_split(df)
     training_samples = len(train_df.index)
