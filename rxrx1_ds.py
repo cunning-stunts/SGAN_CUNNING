@@ -16,12 +16,22 @@ from utils import get_number_of_target_classes
 
 
 def load_img(feature, label):
-    path = feature["img_location"]
-    image = tf.io.read_file(path)
-    image = tf.io.decode_image(image, channels=INPUT_IMG_SHAPE[-1])
-    image.set_shape(INPUT_IMG_SHAPE)
-    del feature["img_location"]
-    feature["img"] = image
+    final_tensor = None
+    channels = range(1, 7)
+    for channel in channels:
+        img_path_title = f'img_loc_{channel}'
+        path = feature[img_path_title]
+        image = tf.io.read_file(path)
+        image = tf.io.decode_image(image, channels=INPUT_IMG_SHAPE[-1])
+        image.set_shape(INPUT_IMG_SHAPE)
+        if final_tensor is None:
+            final_tensor = image
+        else:
+            final_tensor = tf.concat([final_tensor, image], axis=2)
+
+    for i in channels:
+        del feature[f"img_loc_{i}"]
+    feature["img"] = final_tensor
     return feature, label
 
 
@@ -79,13 +89,13 @@ def get_ds(
 
     ds = tf.data.Dataset.from_tensor_slices((dict(df), one_hot))
     ds = ds.map(
-        load_img,
+        map_func=load_img,
         num_parallel_calls=AUTOTUNE
     )
     ds = ds.apply(tf.data.experimental.ignore_errors())
     if CROP:
         ds = ds.map(
-            crop_image,
+            map_func=crop_image,
             num_parallel_calls=AUTOTUNE
         )
     if perform_img_augmentation:

@@ -15,10 +15,26 @@ def get_dataframe(ds_location):
         return pd.read_pickle("df.pkl")
         # return pickle.load("df.pkl")
     df = get_merged_df(ds_location, "train")
+    df = merge_by_channel(df)
     df["sirna"] = df["sirna"].astype(int)
     # train_df["sirna"] = train_df["sirna"].astype(str)
     df["well_type"] = df["well_type"].replace(np.nan, '', regex=True)
     df.to_pickle("df.pkl")
+    return df
+
+
+def merge_by_channel(df):
+    df = df.sort_values('img_location')
+    img_loc_chan = pd.DataFrame(df.pop('microscope_channel'))
+    img_loc_chan['img_loc'] = df.pop('img_location')
+    df = df.drop_duplicates()
+    channels = img_loc_chan['microscope_channel'].drop_duplicates()
+    for i in channels:
+        channel_n = img_loc_chan.loc[img_loc_chan['microscope_channel'].isin([i])]
+        channel_n.rename(columns={'img_loc': f'img_loc_{i}'}, inplace=True)
+        df = df.reset_index(drop=True)
+        channel_n = channel_n.reset_index(drop=True)
+        df = pd.concat([df, channel_n[f'img_loc_{i}']], axis=1)
     return df
 
 
@@ -57,6 +73,7 @@ def get_merged_df(ds_location, dataset_type):
                     "img_location": i,
                     "id_code": f"{cell_line}-{batch_number:02d}_{plate}_{well_column}{well_row:02d}"
                 })
+
     return merge_dfs(sirna_df, pd.DataFrame(data), controls_df)
 
 

@@ -1,6 +1,6 @@
 INPUT_IMG_SHAPE = (512, 512, 1)
-OUTPUT_IMG_SHAPE = (256, 256, 1)  # half of the input image size
-CROP_SIZE = (128, 128, 1)  # 1/8 of the input image feels better then 1/16
+OUTPUT_IMG_SHAPE = (256, 256, 6)  # half of the input image size
+CROP_SIZE = (128, 128, 6)  # 1/8 of the input image feels better then 1/16
 CROP = True
 BATCH_SIZE = 32
 EPOCHS = 100
@@ -10,5 +10,5 @@ HIDDEN_UNITS = [16, 8]
 # SHUFFLE_BUFFER_SIZE = 1
 SHUFFLE_BUFFER_SIZE = 4_344  # works fine
 # SHUFFLE_BUFFER_SIZE = 487_344  # this will eat all your RAM (Was using 100GB on my system before I killed)
-TENSORBOARD_UPDATE_FREQUENCY = 500
+TENSORBOARD_UPDATE_FREQUENCY = 100
 # TENSORBOARD_UPDATE_FREQUENCY = 30
