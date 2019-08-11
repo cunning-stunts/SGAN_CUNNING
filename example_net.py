@@ -9,7 +9,6 @@ import tensorflow as tf
 
 tf.logging.set_verbosity(tf.logging.WARN)
 from sklearn.model_selection import train_test_split
-from tensorflow.python.keras.callbacks import TensorBoard
 
 from consts import BATCH_SIZE, EPOCHS, EMBEDDING_DIMS, HASH_BUCKET_SIZE, HIDDEN_UNITS, SHUFFLE_BUFFER_SIZE, \
     TENSORBOARD_UPDATE_FREQUENCY, OUTPUT_IMG_SHAPE, CROP, CROP_SIZE

@@ -6,6 +6,7 @@ os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 
 import cv2
 import tensorflow as tf
+
 tf.logging.set_verbosity(tf.logging.WARN)
 import numpy as np
 from tensorflow.python.ops.image_ops_impl import convert_image_dtype, ResizeMethod
@@ -92,7 +93,7 @@ def get_ds(
         map_func=load_img,
         num_parallel_calls=AUTOTUNE
     )
-    ds = ds.apply(tf.data.experimental.ignore_errors())
+    # ds = ds.apply(tf.data.experimental.ignore_errors())
     if CROP:
         ds = ds.map(
             map_func=crop_image,
