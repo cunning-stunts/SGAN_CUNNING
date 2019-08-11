@@ -31,11 +31,12 @@ def wide_and_deep_classifier(
         deep = tf.keras.layers.Dense(numnodes, activation='relu', name='dnn_{}'.format(layerno + 1))(deep)
     wide = tf.keras.layers.DenseFeatures(linear_feature_columns, name='wide_inputs')(inputs)
 
-    img_net = tf.keras.applications.mobilenet_v2.MobileNetV2(
-        alpha=1.0,
+    img_net = tf.keras.applications.InceptionResNetV2(
         include_top=False,
         weights=None,
-        input_tensor=inputs['img'],
+        # weights='imagenet',
+        input_tensor=inputs["img"],
+        input_shape=None,
         pooling="max"
     )
 
@@ -43,9 +44,10 @@ def wide_and_deep_classifier(
 
     output = tf.keras.layers.Dense(number_of_target_classes, activation='softmax', name='pred')(both)
     model = tf.keras.Model(inputs, output)
-    model.compile(optimizer='adam',
-                  loss='categorical_crossentropy',
-                  metrics=['accuracy'])
+    model.compile(
+        optimizer='adam',
+        loss='categorical_crossentropy',
+        metrics=['accuracy'])
     return model
 
 
@@ -63,7 +65,10 @@ def get_features(ds):
                    for colname in sparse.keys()})
 
     # we should have a crossed column
-    sparse['crossed'] = tf.feature_column.crossed_column(['well_column', 'well_row'], int(HASH_BUCKET_SIZE**2.0))
+    sparse['crossed'] = tf.feature_column.crossed_column(
+        ['well_column', 'well_row'],
+        int(HASH_BUCKET_SIZE ** 2.0)
+    )
 
     # embed all the sparse columns
     embed = {'embed_{}'.format(colname): tf.feature_column.embedding_column(col, EMBEDDING_DIMS)
