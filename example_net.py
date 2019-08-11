@@ -117,6 +117,15 @@ def export_saved_model(run_id, model, feature_columns):
     })
 
 
+def run_inferrance():
+    # todo:
+    # load test dataset (similar to training data, but without SIRNA)
+    # run predict with our trained model
+    # write to csv
+    # upload to kaggle
+    pass
+
+
 def main(_run_id=None):
     df = get_dataframe(DF_LOCATION)
     number_of_target_classes = get_number_of_target_classes(df)
@@ -172,6 +181,7 @@ def main(_run_id=None):
 
     # tf.keras.utils.plot_model(model, f'models/{run_id}/model.png', show_shapes=True, rankdir='LR')
     train_model(model, train_ds, test_ds, run_id, training_steps_per_epoch, validation_steps_per_epoch)
+    run_inferrance()
     export_saved_model(run_id, model, real)
     print("")
 
