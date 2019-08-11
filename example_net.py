@@ -11,7 +11,7 @@ tf.logging.set_verbosity(tf.logging.WARN)
 from sklearn.model_selection import train_test_split
 
 from consts import BATCH_SIZE, EPOCHS, EMBEDDING_DIMS, HASH_BUCKET_SIZE, HIDDEN_UNITS, SHUFFLE_BUFFER_SIZE, \
-    TENSORBOARD_UPDATE_FREQUENCY, OUTPUT_IMG_SHAPE, CROP, CROP_SIZE
+    TENSORBOARD_UPDATE_FREQUENCY, OUTPUT_IMG_SHAPE, CROP, CROP_SIZE, DF_LOCATION
 from rxrx1_df import get_dataframe
 from rxrx1_ds import get_ds
 from utils import get_random_string, get_number_of_target_classes
@@ -63,7 +63,7 @@ def get_features(ds):
                    for colname in sparse.keys()})
 
     # we should have a crossed column
-    # sparse['crossed'] = tf.feature_column.crossed_column([sparse['well_column'], real['well_row']], HASH_BUCKET_SIZE)
+    sparse['crossed'] = tf.feature_column.crossed_column(['well_column', 'well_row'], int(HASH_BUCKET_SIZE**2.0))
 
     # embed all the sparse columns
     embed = {'embed_{}'.format(colname): tf.feature_column.embedding_column(col, EMBEDDING_DIMS)
@@ -73,14 +73,9 @@ def get_features(ds):
     sparse = {colname: tf.feature_column.indicator_column(col)
               for colname, col in sparse.items()}
 
-    if CROP:
-        inputs.update({
-            "img": tf.keras.layers.Input(name="img", shape=CROP_SIZE, dtype='float32')
-        })
-    else:
-        inputs.update({
-            "img": tf.keras.layers.Input(name="img", shape=OUTPUT_IMG_SHAPE, dtype='float32')
-        })
+    inputs.update({
+        "img": tf.keras.layers.Input(name="img", shape=CROP_SIZE if CROP else OUTPUT_IMG_SHAPE, dtype='float32')
+    })
     return inputs, sparse, real
 
 
@@ -109,14 +104,16 @@ def train_model(model, train_ds, test_ds, run_id, steps_per_epoch, validation_st
     return history
 
 
-def export_saved_model(run_id, model):
+def export_saved_model(run_id, model, feature_columns):
     export_dir = os.path.join('models', run_id, f'model_{time.strftime("%Y%m%d-%H%M%S")}')
     print('Exporting to {}'.format(export_dir))
-    tf.keras.experimental.export_saved_model(model, export_dir)
+    tf.keras.experimental.export_saved_model(model, export_dir, custom_objects={
+        'feature_columns': feature_columns
+    })
 
 
 def main(_run_id=None):
-    df = get_dataframe('/home/paul/PycharmProjects/recursion-cellular-image-classification')
+    df = get_dataframe(DF_LOCATION)
     number_of_target_classes = get_number_of_target_classes(df)
 
     if _run_id is None:
@@ -170,7 +167,7 @@ def main(_run_id=None):
 
     # tf.keras.utils.plot_model(model, f'models/{run_id}/model.png', show_shapes=True, rankdir='LR')
     train_model(model, train_ds, test_ds, run_id, training_steps_per_epoch, validation_steps_per_epoch)
-    export_saved_model(run_id, model)
+    export_saved_model(run_id, model, real)
     print("")
 
 

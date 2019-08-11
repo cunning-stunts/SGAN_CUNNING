@@ -12,3 +12,4 @@ SHUFFLE_BUFFER_SIZE = 4_344  # works fine
 # SHUFFLE_BUFFER_SIZE = 487_344  # this will eat all your RAM (Was using 100GB on my system before I killed)
 TENSORBOARD_UPDATE_FREQUENCY = 100
 # TENSORBOARD_UPDATE_FREQUENCY = 30
+DF_LOCATION = 'D:/rxrx1'
