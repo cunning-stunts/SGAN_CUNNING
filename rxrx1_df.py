@@ -4,22 +4,31 @@ import math
 import pandas as pd
 import numpy as np
 
+from consts import DF_LOCATION
+
 
 def get_filename(i):
     return os.path.basename(os.path.normpath(i))
 
 
-def get_dataframe(ds_location):
-    if os.path.exists("df.pkl"):
+def get_dataframe(ds_location, is_test=False):
+    if is_test:
+        folder_name = "test"
+    else:
+        folder_name = "train"
+    filename = f"df_{folder_name}.pkl"
+    if os.path.exists(filename):
         print("Loading existing df!")
-        return pd.read_pickle("df.pkl")
+        return pd.read_pickle(filename)
         # return pickle.load("df.pkl")
-    df = get_merged_df(ds_location, "train")
+    df = get_merged_df(ds_location, folder_name, is_test)
     df = merge_by_channel(df)
-    df["sirna"] = df["sirna"].astype(int)
-    # train_df["sirna"] = train_df["sirna"].astype(str)
-    df["well_type"] = df["well_type"].replace(np.nan, '', regex=True)
-    df.to_pickle("df.pkl")
+    if not is_test:
+        df["sirna"] = df["sirna"].astype(int)
+    else:
+        df.pop("sirna")
+    df = df.replace(np.nan, '', regex=True)
+    df.to_pickle(filename)
     return df
 
 
@@ -38,7 +47,7 @@ def merge_by_channel(df):
     return df
 
 
-def get_merged_df(ds_location, dataset_type):
+def get_merged_df(ds_location, dataset_type, is_test):
     sirna_df = pd.read_csv(os.path.join(ds_location, f"{dataset_type}.csv"))
     controls_df = pd.read_csv(os.path.join(ds_location, f"{dataset_type}_controls.csv"))
     data = []
@@ -74,18 +83,26 @@ def get_merged_df(ds_location, dataset_type):
                     "id_code": f"{cell_line}-{batch_number:02d}_{plate}_{well_column}{well_row:02d}"
                 })
 
-    return merge_dfs(sirna_df, pd.DataFrame(data), controls_df)
+    return add_sirna(sirna_df, pd.DataFrame(data), controls_df, is_test)
 
 
-# SALE NOW ON
-def merge_dfs(sirna_df, metadata_df, controls_df):
-    metadata_with_sirna = pd.merge(metadata_df, sirna_df[["id_code", "sirna"]], on="id_code", how="left")
-    sirnas = metadata_with_sirna.pop("sirna")
+def add_sirna(sirna_df, metadata_df, controls_df, is_test):
+    if is_test:
+        metadata_with_sirna = pd.merge(metadata_df, sirna_df[["id_code"]], on="id_code", how="left")
+    else:
+        metadata_with_sirna = pd.merge(metadata_df, sirna_df[["id_code", "sirna"]], on="id_code", how="left")
+        sirnas = metadata_with_sirna.pop("sirna")
     control_merged = pd.merge(
         metadata_with_sirna,
         controls_df[["id_code", "well_type", "sirna"]],
         on="id_code", how="left"
     )
+    if not is_test:
+        set_sirna(control_merged, sirnas)
+    return control_merged
+
+
+def set_sirna(control_merged, sirnas):
     sirnas2 = control_merged.pop("sirna")
     sirnas3 = []
     for s1, s2 in zip(sirnas, sirnas2):
@@ -96,8 +113,9 @@ def merge_dfs(sirna_df, metadata_df, controls_df):
         else:
             raise
     control_merged["sirna"] = sirnas3
-    return control_merged
 
 
 if __name__ == '__main__':
-    _df = get_dataframe("D:\\rxrx1")
+    test_df = get_dataframe(DF_LOCATION, is_test=True)
+    train_df = get_dataframe(DF_LOCATION, is_test=False)
+    print("")

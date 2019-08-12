@@ -1,7 +1,7 @@
 INPUT_IMG_SHAPE = (512, 512, 1)
 OUTPUT_IMG_SHAPE = (512, 512, 6)  # half of the input image size
 CROP_SIZE = (128, 128, 6)  # 1/8 of the input image feels better then 1/16
-CROP = True
+CROP = False
 BATCH_SIZE = 32
 EPOCHS = 100
 EMBEDDING_DIMS = 5

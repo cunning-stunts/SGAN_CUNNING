@@ -11,7 +11,7 @@ tf.logging.set_verbosity(tf.logging.WARN)
 import numpy as np
 from tensorflow.python.ops.image_ops_impl import convert_image_dtype, ResizeMethod
 
-from consts import INPUT_IMG_SHAPE, OUTPUT_IMG_SHAPE, BATCH_SIZE, CROP_SIZE, CROP
+from consts import INPUT_IMG_SHAPE, OUTPUT_IMG_SHAPE, BATCH_SIZE, CROP_SIZE, CROP, DF_LOCATION
 from rxrx1_df import get_dataframe
 from utils import get_number_of_target_classes
 
@@ -45,13 +45,13 @@ def add_gausian_noise(x_new, std_dev):
 
 def img_augmentation(x_dict, label):
     x = x_dict["img"]
-    x_new = tf.image.random_brightness(x, 0.05)
+    x_new = tf.image.random_brightness(x, 0.1)
     x_new = tf.image.random_contrast(x_new, 0.8, 1.2)
     x_new = tf.image.random_flip_left_right(x_new)
     x_new = tf.image.random_flip_up_down(x_new)
     # x_new = tf.image.random_hue(x_new, 0.06) # requires colour
     # x_new = tf.image.random_saturation(x_new, 0.1, 1.9) # requires colour
-    x_new = add_gausian_noise(x_new, std_dev=0.05)
+    x_new = add_gausian_noise(x_new, std_dev=0.01)
     x_dict["img"] = x_new
 
     return x_dict, label
@@ -119,6 +119,7 @@ def get_ds(
 
 
 def show_ds(ds):
+    cv2.namedWindow('image', cv2.WINDOW_NORMAL)
     iter = ds.make_one_shot_iterator()
     x, y = iter.get_next()
     with tf.Session() as sess:
@@ -128,26 +129,42 @@ def show_ds(ds):
                 imgs = x1["img"]
                 for img, y2 in zip(imgs, y1):  # batch size
                     #
-                    # TODO:
                     # BEAR IN MIND
                     # THE ACTUAL CLASS ID IS 1..N
                     # BUT ARGMAX WILL RETURN 0..N-1
-                    # TODO:
                     #
-                    argmax = np.argmax(y2)
+                    argmax = np.argmax(y2) + 1
                     print(f"y2: {argmax}")
-                    cv2.imshow('image', img)
-                    cv2.waitKey(0)
+                    stacked = []
+                    for i in range(0, 6, 3):
+                        img_1 = img[:, :, i + 0]
+                        img_2 = img[:, :, i + 1]
+                        img_3 = img[:, :, i + 2]
+                        stacked.append(np.dstack((img_1, img_2, img_3)))
+                    dst = cv2.addWeighted(stacked[0], 0.5, stacked[1], 0.5, 0)
+                    cv2.imshow('image', dst)
+                    cv2.waitKey(25)
             except Exception as e:
                 print(e)
                 break
     cv2.destroyAllWindows()
 
 
-if __name__ == '__main__':
-    _df = get_dataframe("D:\\rxrx1")
+def load_and_show_ds():
+    _df = get_dataframe(DF_LOCATION, is_test=False)
     number_of_classes = get_number_of_target_classes(_df)
     _ds = get_ds(
-        _df, number_of_target_classes=number_of_classes, normalise=False
+        _df, number_of_target_classes=number_of_classes, normalise=False, perform_img_augmentation=True
     )
     show_ds(_ds)
+
+    _df = get_dataframe(DF_LOCATION, is_test=True)
+    _ds = get_ds(
+        _df, number_of_target_classes=number_of_classes, normalise=False, perform_img_augmentation=False
+    )
+    show_ds(_ds)
+
+
+if __name__ == '__main__':
+    os.environ['CUDA_VISIBLE_DEVICES'] = '-1'
+    load_and_show_ds()
